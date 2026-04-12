@@ -1,16 +1,31 @@
 const jwt = require("jsonwebtoken");
+const { randomUUID } = require("crypto");
 require("dotenv").config();
 
 const generateAccessToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
-    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN,
-  });
+  return jwt.sign(
+    {
+      ...payload,
+      jti: randomUUID(),
+    },
+    process.env.JWT_ACCESS_SECRET,
+    {
+      expiresIn: process.env.JWT_ACCESS_EXPIRES_IN,
+    },
+  );
 };
 
 const generateRefreshToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: process.env.JWT_REFRESH_EXPIRES_IN,
-  });
+  return jwt.sign(
+    {
+      ...payload,
+      jti: randomUUID(),
+    },
+    process.env.JWT_REFRESH_SECRET,
+    {
+      expiresIn: process.env.JWT_REFRESH_EXPIRES_IN,
+    },
+  );
 };
 
 const verifyAccessToken = (token) => {

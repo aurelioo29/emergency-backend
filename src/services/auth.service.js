@@ -1,4 +1,10 @@
-const { User, AdminUser, Officer, RefreshToken } = require("../models");
+const {
+  User,
+  AdminUser,
+  Officer,
+  RefreshToken,
+  sequelize,
+} = require("../models");
 const { hashPassword, comparePassword } = require("../utils/hash");
 const {
   generateAccessToken,
@@ -34,13 +40,21 @@ class AuthService {
     return now;
   }
 
-  static async saveRefreshToken({ ownerType, ownerId, token }) {
-    return RefreshToken.create({
-      ownerType,
-      ownerId,
-      token,
-      expiresAt: this.getRefreshTokenExpiryDate(),
-    });
+  static async saveRefreshToken({
+    ownerType,
+    ownerId,
+    token,
+    transaction = null,
+  }) {
+    return RefreshToken.create(
+      {
+        ownerType,
+        ownerId,
+        token,
+        expiresAt: this.getRefreshTokenExpiryDate(),
+      },
+      transaction ? { transaction } : {},
+    );
   }
 
   static async register(payload) {
@@ -236,6 +250,10 @@ class AuthService {
   static async refreshToken(payload) {
     const { refreshToken } = payload;
 
+    if (!refreshToken) {
+      throw new AppError("Refresh token is required", 422);
+    }
+
     let decoded;
     try {
       decoded = verifyRefreshToken(refreshToken);
@@ -258,10 +276,6 @@ class AuthService {
       throw new AppError("Refresh token has expired", 401);
     }
 
-    await storedToken.update({
-      revokedAt: new Date(),
-    });
-
     const newPayload = {
       id: decoded.id,
       role: decoded.role,
@@ -269,22 +283,19 @@ class AuthService {
     };
 
     const newAccessToken = generateAccessToken(newPayload);
-    const newRefreshToken = generateRefreshToken(newPayload);
-
-    await this.saveRefreshToken({
-      ownerType: decoded.type,
-      ownerId: decoded.id,
-      token: newRefreshToken,
-    });
 
     return {
       accessToken: newAccessToken,
-      refreshToken: newRefreshToken,
+      refreshToken,
     };
   }
 
   static async logout(authUser, payload) {
     const { refreshToken } = payload;
+
+    if (!refreshToken) {
+      throw new AppError("Refresh token is required", 422);
+    }
 
     const storedToken = await RefreshToken.findOne({
       where: {
