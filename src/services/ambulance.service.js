@@ -134,6 +134,10 @@ class AmbulanceService {
       ...(payload.status !== undefined && {
         status: payload.status,
       }),
+      ...(payload.status === "INACTIVE" && {
+        currentLatitude: null,
+        currentLongitude: null,
+      }),
     });
 
     return ambulance;

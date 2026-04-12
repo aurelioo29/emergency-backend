@@ -31,7 +31,12 @@ const Ambulance = sequelize.define(
       field: "current_longitude",
     },
     status: {
-      type: DataTypes.ENUM("AVAILABLE", "DISPATCHED", "MAINTENANCE"),
+      type: DataTypes.ENUM(
+        "AVAILABLE",
+        "DISPATCHED",
+        "MAINTENANCE",
+        "INACTIVE",
+      ),
       allowNull: false,
       defaultValue: "AVAILABLE",
     },

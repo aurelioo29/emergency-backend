@@ -1,6 +1,11 @@
 const { body, param, query } = require("express-validator");
 
-const ambulanceStatuses = ["AVAILABLE", "DISPATCHED", "MAINTENANCE"];
+const ambulanceStatuses = [
+  "AVAILABLE",
+  "DISPATCHED",
+  "MAINTENANCE",
+  "INACTIVE",
+];
 
 const createAmbulanceValidation = [
   body("code")
