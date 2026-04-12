@@ -3,6 +3,10 @@ const {
   ReportTrackingLog,
   Hospital,
   User,
+  Dispatch,
+  Officer,
+  Ambulance,
+  AdminUser,
 } = require("../models");
 const AppError = require("../utils/AppError");
 const { Op } = require("sequelize");
@@ -141,6 +145,32 @@ class EmergencyReportService {
           as: "trackingLogs",
           separate: true,
           order: [["created_at", "DESC"]],
+        },
+        {
+          model: Dispatch,
+          as: "dispatches",
+          separate: true,
+          order: [["assignedAt", "DESC"]],
+          include: [
+            {
+              model: Officer,
+              as: "officer",
+              attributes: ["id", "fullName", "phoneNumber", "role", "status"],
+              required: false,
+            },
+            {
+              model: Ambulance,
+              as: "ambulance",
+              attributes: ["id", "code", "plateNumber", "status"],
+              required: false,
+            },
+            {
+              model: AdminUser,
+              as: "assignedByAdmin",
+              attributes: ["id", "fullName", "email", "role"],
+              required: false,
+            },
+          ],
         },
       ],
     });
