@@ -47,6 +47,16 @@ const EmergencyReport = sequelize.define(
       allowNull: true,
       field: "address_snapshot",
     },
+    photoUrl: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: "photo_url",
+    },
+    photoCapturedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "photo_captured_at",
+    },
     status: {
       type: DataTypes.ENUM(
         "REPORTED",
