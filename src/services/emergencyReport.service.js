@@ -23,22 +23,34 @@ class EmergencyReportService {
     return `EMG-${yyyy}${mm}${dd}-${rand}`;
   }
 
-  static async createReport(authUser, payload) {
-    const { emergencyType, description, latitude, longitude, addressSnapshot } =
-      payload;
+  static async createReport(authUser, payload, photoFile) {
+    const {
+      emergencyType,
+      description,
+      latitude,
+      longitude,
+      addressSnapshot,
+      photoCapturedAt,
+    } = payload;
 
-    if (authUser.type !== "USER") {
-      throw new AppError("Only user can create emergency report", 403);
+    if (!photoFile) {
+      throw new AppError("Photo is required", 400);
     }
 
+    const reportCode = await this.generateReportCode();
+
+    const photoUrl = `/uploads/emergency-reports/${photoFile.filename}`;
+
     const report = await EmergencyReport.create({
-      reportCode: this.generateReportCode(),
+      reportCode,
       userId: authUser.id,
       emergencyType,
       description: description || null,
       latitude,
       longitude,
       addressSnapshot: addressSnapshot || null,
+      photoUrl,
+      photoCapturedAt: photoCapturedAt || new Date(),
       status: "REPORTED",
       requestedAt: new Date(),
     });
@@ -51,25 +63,19 @@ class EmergencyReportService {
       updatedById: authUser.id,
     });
 
-    emitToAdminRoom("report:new", {
-      id: report.id,
-      reportCode: report.reportCode,
-      userId: report.userId,
-      emergencyType: report.emergencyType,
-      status: report.status,
-      latitude: report.latitude,
-      longitude: report.longitude,
-      createdAt: report.createdAt,
-    });
-
-    emitToUser(authUser.id, "report:created", {
-      id: report.id,
-      reportCode: report.reportCode,
-      emergencyType: report.emergencyType,
-      status: report.status,
-    });
-
     return report;
+  }
+
+  static async generateReportCode() {
+    const now = new Date();
+
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+
+    const random = Math.floor(1000 + Math.random() * 9000);
+
+    return `EMG-${yyyy}${mm}${dd}-${random}`;
   }
 
   static async getMyReports(authUser, query) {

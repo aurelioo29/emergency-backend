@@ -15,34 +15,35 @@ const createEmergencyReportValidation = [
   body("emergencyType")
     .notEmpty()
     .withMessage("Emergency type is required")
-    .isIn(emergencyTypes)
-    .withMessage(`Emergency type must be one of: ${emergencyTypes.join(", ")}`),
+    .isIn(["SOS", "AMBULANCE", "FIRE", "CRIME"])
+    .withMessage("Emergency type is invalid"),
 
   body("description")
-    .optional({ nullable: true })
-    .isString()
-    .withMessage("Description must be a string")
-    .isLength({ max: 1000 })
-    .withMessage("Description must not exceed 1000 characters"),
+    .optional()
+    .isLength({ min: 3 })
+    .withMessage("Description must be at least 3 characters"),
 
   body("latitude")
     .notEmpty()
     .withMessage("Latitude is required")
-    .isFloat({ min: -90, max: 90 })
-    .withMessage("Latitude must be a valid number between -90 and 90"),
+    .isFloat()
+    .withMessage("Latitude must be a valid number"),
 
   body("longitude")
     .notEmpty()
     .withMessage("Longitude is required")
-    .isFloat({ min: -180, max: 180 })
-    .withMessage("Longitude must be a valid number between -180 and 180"),
+    .isFloat()
+    .withMessage("Longitude must be a valid number"),
 
   body("addressSnapshot")
-    .optional({ nullable: true })
+    .optional()
     .isString()
-    .withMessage("Address snapshot must be a string")
-    .isLength({ max: 1000 })
-    .withMessage("Address snapshot must not exceed 1000 characters"),
+    .withMessage("Address snapshot must be a string"),
+
+  body("photoCapturedAt")
+    .optional()
+    .isISO8601()
+    .withMessage("Photo captured time must be a valid ISO date"),
 ];
 
 const emergencyReportIdParamValidation = [

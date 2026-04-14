@@ -11,12 +11,14 @@ const {
   allReportsQueryValidation,
   updateEmergencyReportStatusValidation,
 } = require("../validations/emergencyReport.validation");
+const { uploadEmergencyPhoto } = require("../middlewares/upload.middleware");
 
 router.use(authMiddleware);
 
 // user
 router.post(
   "/",
+  uploadEmergencyPhoto.single("photo"),
   createEmergencyReportValidation,
   validate,
   EmergencyReportController.create,

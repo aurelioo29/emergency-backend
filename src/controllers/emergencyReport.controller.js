@@ -7,6 +7,7 @@ class EmergencyReportController {
       const result = await EmergencyReportService.createReport(
         req.user,
         req.body,
+        req.file,
       );
 
       return sendSuccess(res, {
