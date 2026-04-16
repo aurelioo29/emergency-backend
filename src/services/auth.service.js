@@ -141,10 +141,14 @@ class AuthService {
 
   static async loginUser(payload) {
     const { phoneNumber, password } = payload;
-    const normalizedPhone = this.normalizePhoneNumber(phoneNumber);
+    const phoneVariants = this.getPhoneVariants(phoneNumber);
 
     const user = await User.findOne({
-      where: { phoneNumber: normalizedPhone },
+      where: {
+        phoneNumber: {
+          [Op.in]: phoneVariants,
+        },
+      },
     });
 
     if (!user) {
