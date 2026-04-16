@@ -14,6 +14,7 @@ const {
 } = require("../utils/jwt");
 const AppError = require("../utils/AppError");
 const FonnteService = require("./fonnte.service");
+const { Op } = require("sequelize");
 
 class AuthService {
   static getRefreshTokenExpiryDate() {
@@ -417,15 +418,21 @@ class AuthService {
 
   static async requestForgotPasswordOtp(payload) {
     const rawPhone = payload.phoneNumber;
-    const phoneNumber = this.normalizePhoneNumber(rawPhone);
+    const phoneVariants = this.getPhoneVariants(rawPhone);
 
     const user = await User.findOne({
-      where: { phoneNumber },
+      where: {
+        phoneNumber: {
+          [Op.in]: phoneVariants,
+        },
+      },
     });
 
     if (!user) {
       throw new AppError("Phone number is not registered", 404);
     }
+
+    const phoneNumber = user.phoneNumber;
 
     const existingActiveOtp = await PasswordResetOtp.findOne({
       where: {
@@ -456,6 +463,9 @@ class AuthService {
     const otp = this.generateOtp(6);
     const otpHash = await hashPassword(otp);
     const expiresAt = this.getOtpExpiryDate();
+    const expiresMinutes = Number(
+      process.env.FORGOT_PASSWORD_OTP_EXPIRES_MINUTES || 5,
+    );
 
     const transaction = await sequelize.transaction();
 
@@ -486,18 +496,14 @@ class AuthService {
         { transaction },
       );
 
-      const message = `Kode OTP reset password Anda adalah: ${otp}\n\nBerlaku selama 5 menit.\nJangan bagikan kode ini kepada siapa pun.`;
+      const message = `Kode OTP reset password Anda adalah: ${otp}\n\nBerlaku selama ${expiresMinutes} menit.\nJangan bagikan kode ini kepada siapa pun.`;
 
       await FonnteService.sendWhatsapp({
-        target: phoneNumber,
+        target: this.normalizePhoneNumber(phoneNumber),
         message,
       });
 
       await transaction.commit();
-
-      const expiresMinutes = Number(
-        process.env.FORGOT_PASSWORD_OTP_EXPIRES_MINUTES || 5,
-      );
 
       return {
         phoneNumber: this.maskPhoneNumber(phoneNumber),
@@ -510,12 +516,14 @@ class AuthService {
   }
 
   static async verifyForgotPasswordOtp(payload) {
-    const phoneNumber = this.normalizePhoneNumber(payload.phoneNumber);
+    const phoneVariants = this.getPhoneVariants(payload.phoneNumber);
     const { otp } = payload;
 
     const otpRecord = await PasswordResetOtp.findOne({
       where: {
-        phoneNumber,
+        phoneNumber: {
+          [Op.in]: phoneVariants,
+        },
         purpose: "FORGOT_PASSWORD",
         usedAt: null,
       },
@@ -526,17 +534,13 @@ class AuthService {
       throw new AppError("OTP not found", 404);
     }
 
-    if (otpRecord.usedAt) {
-      throw new AppError("OTP has already been used", 400);
-    }
+    const maxAttempts = Number(
+      process.env.FORGOT_PASSWORD_OTP_MAX_ATTEMPTS || 5,
+    );
 
     if (new Date(otpRecord.expiresAt) < new Date()) {
       throw new AppError("OTP has expired", 400);
     }
-
-    const maxAttempts = Number(
-      process.env.FORGOT_PASSWORD_OTP_MAX_ATTEMPTS || 5,
-    );
 
     if (otpRecord.attemptCount >= maxAttempts) {
       throw new AppError("OTP attempt limit exceeded", 429);
@@ -555,12 +559,12 @@ class AuthService {
 
     return {
       verified: true,
-      phoneNumber: this.maskPhoneNumber(phoneNumber),
+      phoneNumber: this.maskPhoneNumber(otpRecord.phoneNumber),
     };
   }
 
   static async resetForgotPassword(payload) {
-    const phoneNumber = this.normalizePhoneNumber(payload.phoneNumber);
+    const phoneVariants = this.getPhoneVariants(payload.phoneNumber);
     const { otp, newPassword, confirmPassword } = payload;
 
     if (newPassword !== confirmPassword) {
@@ -568,7 +572,11 @@ class AuthService {
     }
 
     const user = await User.findOne({
-      where: { phoneNumber },
+      where: {
+        phoneNumber: {
+          [Op.in]: phoneVariants,
+        },
+      },
     });
 
     if (!user) {
@@ -577,7 +585,7 @@ class AuthService {
 
     const otpRecord = await PasswordResetOtp.findOne({
       where: {
-        phoneNumber,
+        phoneNumber: user.phoneNumber,
         purpose: "FORGOT_PASSWORD",
         usedAt: null,
       },
@@ -588,11 +596,15 @@ class AuthService {
       throw new AppError("OTP not found", 404);
     }
 
+    const maxAttempts = Number(
+      process.env.FORGOT_PASSWORD_OTP_MAX_ATTEMPTS || 5,
+    );
+
     if (new Date(otpRecord.expiresAt) < new Date()) {
       throw new AppError("OTP has expired", 400);
     }
 
-    if (otpRecord.attemptCount >= 5) {
+    if (otpRecord.attemptCount >= maxAttempts) {
       throw new AppError("OTP attempt limit exceeded", 429);
     }
 
@@ -649,6 +661,13 @@ class AuthService {
       await transaction.rollback();
       throw error;
     }
+  }
+
+  static getPhoneVariants(phoneNumber) {
+    const raw = phoneNumber?.toString().trim() || "";
+    const normalized = this.normalizePhoneNumber(raw);
+
+    return [...new Set([raw, normalized])];
   }
 }
 
