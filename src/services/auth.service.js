@@ -3,6 +3,7 @@ const {
   AdminUser,
   Officer,
   RefreshToken,
+  PasswordResetOtp,
   sequelize,
 } = require("../models");
 const { hashPassword, comparePassword } = require("../utils/hash");
@@ -12,6 +13,7 @@ const {
   verifyRefreshToken,
 } = require("../utils/jwt");
 const AppError = require("../utils/AppError");
+const FonnteService = require("./fonnte.service");
 
 class AuthService {
   static getRefreshTokenExpiryDate() {
@@ -40,6 +42,44 @@ class AuthService {
     return now;
   }
 
+  static getOtpExpiryDate() {
+    const minutes = Number(
+      process.env.FORGOT_PASSWORD_OTP_EXPIRES_MINUTES || 5,
+    );
+
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + minutes);
+
+    return now;
+  }
+
+  static generateOtp(length = 6) {
+    let otp = "";
+    for (let i = 0; i < length; i += 1) {
+      otp += Math.floor(Math.random() * 10).toString();
+    }
+    return otp;
+  }
+
+  static normalizePhoneNumber(phoneNumber) {
+    if (!phoneNumber) return "";
+
+    let normalized = phoneNumber.toString().replace(/\D/g, "");
+
+    if (normalized.startsWith("0")) {
+      normalized = `62${normalized.slice(1)}`;
+    } else if (normalized.startsWith("8")) {
+      normalized = `62${normalized}`;
+    }
+
+    return normalized;
+  }
+
+  static maskPhoneNumber(phoneNumber) {
+    if (!phoneNumber || phoneNumber.length < 4) return phoneNumber;
+    return `${phoneNumber.slice(0, 4)}****${phoneNumber.slice(-3)}`;
+  }
+
   static async saveRefreshToken({
     ownerType,
     ownerId,
@@ -60,8 +100,10 @@ class AuthService {
   static async register(payload) {
     const { fullName, nik, phoneNumber, address, password } = payload;
 
+    const normalizedPhone = this.normalizePhoneNumber(phoneNumber);
+
     const existingPhone = await User.findOne({
-      where: { phoneNumber },
+      where: { phoneNumber: normalizedPhone },
     });
 
     if (existingPhone) {
@@ -81,7 +123,7 @@ class AuthService {
     const user = await User.create({
       fullName,
       nik,
-      phoneNumber,
+      phoneNumber: normalizedPhone,
       address,
       passwordHash,
     });
@@ -98,9 +140,10 @@ class AuthService {
 
   static async loginUser(payload) {
     const { phoneNumber, password } = payload;
+    const normalizedPhone = this.normalizePhoneNumber(phoneNumber);
 
     const user = await User.findOne({
-      where: { phoneNumber },
+      where: { phoneNumber: normalizedPhone },
     });
 
     if (!user) {
@@ -370,6 +413,242 @@ class AuthService {
       role: "USER",
       type: "USER",
     };
+  }
+
+  static async requestForgotPasswordOtp(payload) {
+    const rawPhone = payload.phoneNumber;
+    const phoneNumber = this.normalizePhoneNumber(rawPhone);
+
+    const user = await User.findOne({
+      where: { phoneNumber },
+    });
+
+    if (!user) {
+      throw new AppError("Phone number is not registered", 404);
+    }
+
+    const existingActiveOtp = await PasswordResetOtp.findOne({
+      where: {
+        phoneNumber,
+        purpose: "FORGOT_PASSWORD",
+        usedAt: null,
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    const cooldownSeconds = Number(
+      process.env.FORGOT_PASSWORD_OTP_RESEND_COOLDOWN_SECONDS || 60,
+    );
+
+    if (
+      existingActiveOtp &&
+      existingActiveOtp.lastSentAt &&
+      new Date(existingActiveOtp.lastSentAt).getTime() +
+        cooldownSeconds * 1000 >
+        Date.now()
+    ) {
+      throw new AppError(
+        `Please wait ${cooldownSeconds} seconds before requesting another OTP`,
+        429,
+      );
+    }
+
+    const otp = this.generateOtp(6);
+    const otpHash = await hashPassword(otp);
+    const expiresAt = this.getOtpExpiryDate();
+
+    const transaction = await sequelize.transaction();
+
+    try {
+      await PasswordResetOtp.update(
+        {
+          usedAt: new Date(),
+        },
+        {
+          where: {
+            phoneNumber,
+            purpose: "FORGOT_PASSWORD",
+            usedAt: null,
+          },
+          transaction,
+        },
+      );
+
+      await PasswordResetOtp.create(
+        {
+          userId: user.id,
+          phoneNumber,
+          otpHash,
+          purpose: "FORGOT_PASSWORD",
+          expiresAt,
+          lastSentAt: new Date(),
+        },
+        { transaction },
+      );
+
+      const message = `Kode OTP reset password Anda adalah: ${otp}\n\nBerlaku selama 5 menit.\nJangan bagikan kode ini kepada siapa pun.`;
+
+      await FonnteService.sendWhatsapp({
+        target: phoneNumber,
+        message,
+      });
+
+      await transaction.commit();
+
+      const expiresMinutes = Number(
+        process.env.FORGOT_PASSWORD_OTP_EXPIRES_MINUTES || 5,
+      );
+
+      return {
+        phoneNumber: this.maskPhoneNumber(phoneNumber),
+        expiresInSeconds: expiresMinutes * 60,
+      };
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  }
+
+  static async verifyForgotPasswordOtp(payload) {
+    const phoneNumber = this.normalizePhoneNumber(payload.phoneNumber);
+    const { otp } = payload;
+
+    const otpRecord = await PasswordResetOtp.findOne({
+      where: {
+        phoneNumber,
+        purpose: "FORGOT_PASSWORD",
+        usedAt: null,
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    if (!otpRecord) {
+      throw new AppError("OTP not found", 404);
+    }
+
+    if (otpRecord.usedAt) {
+      throw new AppError("OTP has already been used", 400);
+    }
+
+    if (new Date(otpRecord.expiresAt) < new Date()) {
+      throw new AppError("OTP has expired", 400);
+    }
+
+    const maxAttempts = Number(
+      process.env.FORGOT_PASSWORD_OTP_MAX_ATTEMPTS || 5,
+    );
+
+    if (otpRecord.attemptCount >= maxAttempts) {
+      throw new AppError("OTP attempt limit exceeded", 429);
+    }
+
+    const isValidOtp = await comparePassword(otp, otpRecord.otpHash);
+
+    await otpRecord.update({
+      attemptCount: otpRecord.attemptCount + 1,
+      verifiedAt: isValidOtp ? new Date() : otpRecord.verifiedAt,
+    });
+
+    if (!isValidOtp) {
+      throw new AppError("Invalid OTP", 400);
+    }
+
+    return {
+      verified: true,
+      phoneNumber: this.maskPhoneNumber(phoneNumber),
+    };
+  }
+
+  static async resetForgotPassword(payload) {
+    const phoneNumber = this.normalizePhoneNumber(payload.phoneNumber);
+    const { otp, newPassword, confirmPassword } = payload;
+
+    if (newPassword !== confirmPassword) {
+      throw new AppError("Confirm password does not match", 422);
+    }
+
+    const user = await User.findOne({
+      where: { phoneNumber },
+    });
+
+    if (!user) {
+      throw new AppError("User not found", 404);
+    }
+
+    const otpRecord = await PasswordResetOtp.findOne({
+      where: {
+        phoneNumber,
+        purpose: "FORGOT_PASSWORD",
+        usedAt: null,
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    if (!otpRecord) {
+      throw new AppError("OTP not found", 404);
+    }
+
+    if (new Date(otpRecord.expiresAt) < new Date()) {
+      throw new AppError("OTP has expired", 400);
+    }
+
+    if (otpRecord.attemptCount >= 5) {
+      throw new AppError("OTP attempt limit exceeded", 429);
+    }
+
+    const isValidOtp = await comparePassword(otp, otpRecord.otpHash);
+
+    await otpRecord.update({
+      attemptCount: otpRecord.attemptCount + 1,
+    });
+
+    if (!isValidOtp) {
+      throw new AppError("Invalid OTP", 400);
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+
+    const transaction = await sequelize.transaction();
+
+    try {
+      await user.update(
+        {
+          passwordHash,
+        },
+        { transaction },
+      );
+
+      await otpRecord.update(
+        {
+          verifiedAt: otpRecord.verifiedAt || new Date(),
+          usedAt: new Date(),
+        },
+        { transaction },
+      );
+
+      await RefreshToken.update(
+        {
+          revokedAt: new Date(),
+        },
+        {
+          where: {
+            ownerType: "USER",
+            ownerId: user.id,
+            revokedAt: null,
+          },
+          transaction,
+        },
+      );
+
+      await transaction.commit();
+
+      return {
+        reset: true,
+      };
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
   }
 }
 

@@ -11,6 +11,9 @@ const {
   loginOfficerValidation,
   refreshTokenValidation,
   logoutValidation,
+  requestForgotPasswordOtpValidation,
+  verifyForgotPasswordOtpValidation,
+  resetForgotPasswordValidation,
 } = require("../validations/auth.validation");
 
 router.post("/register", registerValidation, validate, AuthController.register);
@@ -47,5 +50,26 @@ router.post(
 );
 
 router.get("/me", authMiddleware, AuthController.me);
+
+router.post(
+  "/forgot-password/request-otp",
+  requestForgotPasswordOtpValidation,
+  validate,
+  AuthController.requestForgotPasswordOtp,
+);
+
+router.post(
+  "/forgot-password/verify-otp",
+  verifyForgotPasswordOtpValidation,
+  validate,
+  AuthController.verifyForgotPasswordOtp,
+);
+
+router.post(
+  "/forgot-password/reset",
+  resetForgotPasswordValidation,
+  validate,
+  AuthController.resetForgotPassword,
+);
 
 module.exports = router;

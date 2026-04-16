@@ -93,6 +93,45 @@ class AuthController {
       next(error);
     }
   }
+
+  static async requestForgotPasswordOtp(req, res, next) {
+    try {
+      const result = await AuthService.requestForgotPasswordOtp(req.body);
+
+      return sendSuccess(res, {
+        message: "OTP sent successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async verifyForgotPasswordOtp(req, res, next) {
+    try {
+      const result = await AuthService.verifyForgotPasswordOtp(req.body);
+
+      return sendSuccess(res, {
+        message: "OTP verified successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async resetForgotPassword(req, res, next) {
+    try {
+      const result = await AuthService.resetForgotPassword(req.body);
+
+      return sendSuccess(res, {
+        message: "Password reset successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = AuthController;

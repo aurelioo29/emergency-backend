@@ -78,6 +78,26 @@ const logoutValidation = [
     .withMessage("Refresh token is required"),
 ];
 
+const requestForgotPasswordOtpValidation = [
+  body("phoneNumber").notEmpty().withMessage("Phone number is required"),
+];
+
+const verifyForgotPasswordOtpValidation = [
+  body("phoneNumber").notEmpty().withMessage("Phone number is required"),
+  body("otp").isLength({ min: 6, max: 6 }).withMessage("OTP must be 6 digits"),
+];
+
+const resetForgotPasswordValidation = [
+  body("phoneNumber").notEmpty().withMessage("Phone number is required"),
+  body("otp").isLength({ min: 6, max: 6 }).withMessage("OTP must be 6 digits"),
+  body("newPassword")
+    .isLength({ min: 6 })
+    .withMessage("New password must be at least 6 characters"),
+  body("confirmPassword")
+    .isLength({ min: 6 })
+    .withMessage("Confirm password must be at least 6 characters"),
+];
+
 module.exports = {
   registerValidation,
   loginUserValidation,
@@ -85,4 +105,7 @@ module.exports = {
   loginOfficerValidation,
   refreshTokenValidation,
   logoutValidation,
+  requestForgotPasswordOtpValidation,
+  verifyForgotPasswordOtpValidation,
+  resetForgotPasswordValidation,
 };
