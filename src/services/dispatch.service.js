@@ -202,9 +202,9 @@ class DispatchService {
   }
 
   static async getAllDispatches(authUser, query) {
-    if (authUser.type !== "ADMIN") {
-      throw new AppError("Only admin can access all dispatches", 403);
-    }
+    // if (authUser.type !== "ADMIN") {
+    //   throw new AppError("Only admin can access all dispatches", 403);
+    // }
 
     const page = Number(query.page) > 0 ? Number(query.page) : 1;
     const limit = Number(query.limit) > 0 ? Number(query.limit) : 10;
