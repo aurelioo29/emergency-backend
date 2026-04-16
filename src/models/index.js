@@ -12,6 +12,7 @@ const Dispatch = require("./dispatch.model");
 const ReportTrackingLog = require("./reportTrackingLog.model");
 const OfficerLocation = require("./officerLocation.model");
 const RefreshToken = require("./refreshToken.model");
+const PasswordResetOtp = require("./passwordResetOtp.model");
 
 User.hasMany(EmergencyContact, {
   foreignKey: "user_id",
@@ -76,6 +77,15 @@ OfficerLocation.belongsTo(EmergencyReport, {
   as: "report",
 });
 
+User.hasMany(PasswordResetOtp, {
+  foreignKey: "user_id",
+  as: "passwordResetOtps",
+});
+PasswordResetOtp.belongsTo(User, {
+  foreignKey: "user_id",
+  as: "user",
+});
+
 module.exports = {
   sequelize,
   User,
@@ -90,4 +100,5 @@ module.exports = {
   ReportTrackingLog,
   OfficerLocation,
   RefreshToken,
+  PasswordResetOtp,
 };
