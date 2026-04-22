@@ -9,6 +9,7 @@ const hospitalRoutes = require("./hospital.routes");
 const officerRoutes = require("./officer.routes");
 const ambulanceRoutes = require("./ambulance.routes");
 const userProfileRoutes = require("./userProfile.routes");
+const serviceRoutes = require("./service.routes");
 
 // route modules
 router.use("/auth", authRoutes);
@@ -19,5 +20,6 @@ router.use("/hospitals", hospitalRoutes);
 router.use("/officers", officerRoutes);
 router.use("/ambulances", ambulanceRoutes);
 router.use("/users", userProfileRoutes);
+router.use("/services", serviceRoutes);
 
 module.exports = router;
