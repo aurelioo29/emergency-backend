@@ -30,6 +30,7 @@ const Officer = sequelize.define(
       allowNull: true,
       field: "password_hash",
     },
+    // legacy fallback - jangan hapus dulu
     role: {
       type: DataTypes.ENUM(
         "AMBULANCE_DRIVER",
@@ -39,6 +40,13 @@ const Officer = sequelize.define(
       ),
       allowNull: false,
     },
+
+    roleId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "role_id",
+    },
+
     status: {
       type: DataTypes.ENUM("AVAILABLE", "ON_DUTY", "OFFLINE"),
       allowNull: false,
