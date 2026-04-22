@@ -13,6 +13,8 @@ const ReportTrackingLog = require("./reportTrackingLog.model");
 const OfficerLocation = require("./officerLocation.model");
 const RefreshToken = require("./refreshToken.model");
 const PasswordResetOtp = require("./passwordResetOtp.model");
+const Service = require("./service.model");
+const OfficerService = require("./officerService.model");
 
 User.hasMany(EmergencyContact, {
   foreignKey: "user_id",
@@ -86,6 +88,56 @@ PasswordResetOtp.belongsTo(User, {
   as: "user",
 });
 
+Service.hasMany(EmergencyReport, {
+  foreignKey: "service_id",
+  as: "emergencyReports",
+});
+EmergencyReport.belongsTo(Service, {
+  foreignKey: "service_id",
+  as: "service",
+});
+
+Service.hasMany(Dispatch, {
+  foreignKey: "service_id",
+  as: "dispatches",
+});
+Dispatch.belongsTo(Service, {
+  foreignKey: "service_id",
+  as: "service",
+});
+
+Officer.belongsToMany(Service, {
+  through: OfficerService,
+  foreignKey: "officer_id",
+  otherKey: "service_id",
+  as: "services",
+});
+
+Service.belongsToMany(Officer, {
+  through: OfficerService,
+  foreignKey: "service_id",
+  otherKey: "officer_id",
+  as: "officers",
+});
+
+Officer.hasMany(OfficerService, {
+  foreignKey: "officer_id",
+  as: "officerServices",
+});
+OfficerService.belongsTo(Officer, {
+  foreignKey: "officer_id",
+  as: "officer",
+});
+
+Service.hasMany(OfficerService, {
+  foreignKey: "service_id",
+  as: "officerServices",
+});
+OfficerService.belongsTo(Service, {
+  foreignKey: "service_id",
+  as: "service",
+});
+
 module.exports = {
   sequelize,
   User,
@@ -101,4 +153,6 @@ module.exports = {
   OfficerLocation,
   RefreshToken,
   PasswordResetOtp,
+  Service,
+  OfficerService,
 };

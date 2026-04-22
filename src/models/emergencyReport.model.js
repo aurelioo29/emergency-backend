@@ -61,11 +61,13 @@ const EmergencyReport = sequelize.define(
       type: DataTypes.ENUM(
         "REPORTED",
         "ASSIGNED",
+        "ACCEPTED",
         "ON_THE_WAY",
         "ARRIVED",
         "HANDLING",
         "COMPLETED",
         "CANCELLED",
+        "FAILED",
       ),
       allowNull: false,
       defaultValue: "REPORTED",
@@ -90,6 +92,26 @@ const EmergencyReport = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
       field: "completed_at",
+    },
+    serviceId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "service_id",
+    },
+    acceptedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "accepted_at",
+    },
+    cancelledAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "cancelled_at",
+    },
+    failedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "failed_at",
     },
   },
   {

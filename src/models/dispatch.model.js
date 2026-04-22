@@ -54,6 +54,8 @@ const Dispatch = sequelize.define(
       type: DataTypes.ENUM(
         "ASSIGNED",
         "ACCEPTED",
+        "REJECTED",
+        "EXPIRED",
         "ON_THE_WAY",
         "ARRIVED",
         "COMPLETED",
@@ -66,6 +68,43 @@ const Dispatch = sequelize.define(
     notes: {
       type: DataTypes.TEXT,
       allowNull: true,
+    },
+    serviceId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "service_id",
+    },
+    assignmentOrder: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 1,
+      field: "assignment_order",
+    },
+    autoAssigned: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+      field: "auto_assigned",
+    },
+    expiresAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "expires_at",
+    },
+    rejectedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "rejected_at",
+    },
+    arrivedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "arrived_at",
+    },
+    cancelledAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "cancelled_at",
     },
   },
   {
