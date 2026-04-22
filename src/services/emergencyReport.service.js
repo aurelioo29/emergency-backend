@@ -7,6 +7,7 @@ const {
   Officer,
   Ambulance,
   AdminUser,
+  Service,
 } = require("../models");
 const AppError = require("../utils/AppError");
 const { Op } = require("sequelize");
@@ -23,8 +24,22 @@ class EmergencyReportService {
     return `EMG-${yyyy}${mm}${dd}-${rand}`;
   }
 
+  static mapServiceCodeToLegacyEmergencyType(serviceCode) {
+    switch (serviceCode) {
+      case "AMBULANCE":
+        return "AMBULANCE";
+      case "FIRE":
+        return "FIRE";
+      case "POLICE":
+        return "CRIME";
+      default:
+        return "SOS";
+    }
+  }
+
   static async createReport(authUser, payload, photoFile) {
     const {
+      serviceId,
       emergencyType,
       description,
       latitude,
@@ -37,14 +52,29 @@ class EmergencyReportService {
       throw new AppError("Photo is required", 400);
     }
 
-    const reportCode = await this.generateReportCode();
+    const service = await Service.findOne({
+      where: {
+        id: serviceId,
+        isActive: true,
+      },
+    });
 
+    if (!service) {
+      throw new AppError("Service not found or inactive", 404);
+    }
+
+    const reportCode = this.generateReportCode();
     const photoUrl = `/uploads/emergency-reports/${photoFile.filename}`;
+
+    const legacyEmergencyType =
+      emergencyType ||
+      this.mapServiceCodeToLegacyEmergencyType(service.serviceCode);
 
     const report = await EmergencyReport.create({
       reportCode,
       userId: authUser.id,
-      emergencyType,
+      serviceId: service.id,
+      emergencyType: legacyEmergencyType,
       description: description || null,
       latitude,
       longitude,
@@ -58,24 +88,31 @@ class EmergencyReportService {
     await ReportTrackingLog.create({
       reportId: report.id,
       status: "REPORTED",
-      notes: "Emergency report created by user",
+      notes: `Emergency report created by user for service ${service.serviceName}`,
       updatedByType: "USER",
       updatedById: authUser.id,
     });
 
-    return report;
-  }
+    emitToAdminRoom("report:new", {
+      reportId: report.id,
+      reportCode: report.reportCode,
+      serviceId: service.id,
+      serviceCode: service.serviceCode,
+      serviceName: service.serviceName,
+      status: report.status,
+      userId: authUser.id,
+    });
 
-  static async generateReportCode() {
-    const now = new Date();
+    emitToUser(authUser.id, "report:created", {
+      reportId: report.id,
+      reportCode: report.reportCode,
+      serviceId: service.id,
+      serviceCode: service.serviceCode,
+      serviceName: service.serviceName,
+      status: report.status,
+    });
 
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-
-    const random = Math.floor(1000 + Math.random() * 9000);
-
-    return `EMG-${yyyy}${mm}${dd}-${random}`;
+    return await this.getReportDetail(authUser, report.id);
   }
 
   static async getMyReports(authUser, query) {
@@ -99,9 +136,28 @@ class EmergencyReportService {
       where.emergencyType = query.emergencyType;
     }
 
+    if (query.serviceId) {
+      where.serviceId = query.serviceId;
+    }
+
     const { count, rows } = await EmergencyReport.findAndCountAll({
       where,
       include: [
+        {
+          model: Service,
+          as: "service",
+          attributes: [
+            "id",
+            "serviceCode",
+            "serviceName",
+            "iconName",
+            "colorHex",
+            "requiresDispatch",
+            "autoAcceptMode",
+            "acceptTimeoutSeconds",
+          ],
+          required: false,
+        },
         {
           model: Hospital,
           as: "nearestHospital",
@@ -136,6 +192,23 @@ class EmergencyReportService {
       where,
       include: [
         {
+          model: Service,
+          as: "service",
+          attributes: [
+            "id",
+            "serviceCode",
+            "serviceName",
+            "description",
+            "iconName",
+            "colorHex",
+            "requiresDispatch",
+            "autoAcceptMode",
+            "acceptTimeoutSeconds",
+            "isActive",
+          ],
+          required: false,
+        },
+        {
           model: User,
           as: "user",
           attributes: ["id", "fullName", "nik", "phoneNumber", "address"],
@@ -158,6 +231,12 @@ class EmergencyReportService {
           separate: true,
           order: [["assignedAt", "DESC"]],
           include: [
+            {
+              model: Service,
+              as: "service",
+              attributes: ["id", "serviceCode", "serviceName"],
+              required: false,
+            },
             {
               model: Officer,
               as: "officer",
@@ -207,6 +286,10 @@ class EmergencyReportService {
       where.emergencyType = query.emergencyType;
     }
 
+    if (query.serviceId) {
+      where.serviceId = query.serviceId;
+    }
+
     if (query.search) {
       where[Op.or] = [
         { reportCode: { [Op.iLike]: `%${query.search}%` } },
@@ -218,6 +301,20 @@ class EmergencyReportService {
     const { count, rows } = await EmergencyReport.findAndCountAll({
       where,
       include: [
+        {
+          model: Service,
+          as: "service",
+          attributes: [
+            "id",
+            "serviceCode",
+            "serviceName",
+            "iconName",
+            "colorHex",
+            "requiresDispatch",
+            "autoAcceptMode",
+          ],
+          required: false,
+        },
         {
           model: User,
           as: "user",
@@ -262,11 +359,13 @@ class EmergencyReportService {
     const allowedStatuses = [
       "REPORTED",
       "ASSIGNED",
+      "ACCEPTED",
       "ON_THE_WAY",
       "ARRIVED",
       "HANDLING",
       "COMPLETED",
       "CANCELLED",
+      "FAILED",
     ];
 
     if (!allowedStatuses.includes(status)) {
@@ -281,12 +380,24 @@ class EmergencyReportService {
       updatePayload.assignedAt = new Date();
     }
 
+    if (status === "ACCEPTED") {
+      updatePayload.acceptedAt = new Date();
+    }
+
     if (status === "ARRIVED") {
       updatePayload.arrivedAt = new Date();
     }
 
     if (status === "COMPLETED") {
       updatePayload.completedAt = new Date();
+    }
+
+    if (status === "CANCELLED") {
+      updatePayload.cancelledAt = new Date();
+    }
+
+    if (status === "FAILED") {
+      updatePayload.failedAt = new Date();
     }
 
     await report.update(updatePayload);
