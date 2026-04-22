@@ -15,6 +15,7 @@ const RefreshToken = require("./refreshToken.model");
 const PasswordResetOtp = require("./passwordResetOtp.model");
 const Service = require("./service.model");
 const OfficerService = require("./officerService.model");
+const Role = require("./role.model");
 
 User.hasMany(EmergencyContact, {
   foreignKey: "user_id",
@@ -138,6 +139,16 @@ OfficerService.belongsTo(Service, {
   as: "service",
 });
 
+Role.hasMany(Officer, {
+  foreignKey: "role_id",
+  as: "officers",
+});
+
+Officer.belongsTo(Role, {
+  foreignKey: "role_id",
+  as: "roleDetail",
+});
+
 module.exports = {
   sequelize,
   User,
@@ -155,4 +166,5 @@ module.exports = {
   PasswordResetOtp,
   Service,
   OfficerService,
+  Role,
 };

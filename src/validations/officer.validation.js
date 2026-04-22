@@ -1,12 +1,5 @@
 const { body, param, query } = require("express-validator");
 
-const officerRoles = [
-  "AMBULANCE_DRIVER",
-  "PARAMEDIC",
-  "FIRE_OFFICER",
-  "POLICE",
-];
-
 const officerStatuses = ["AVAILABLE", "ON_DUTY", "OFFLINE"];
 
 const createOfficerValidation = [
@@ -36,11 +29,11 @@ const createOfficerValidation = [
     .isLength({ min: 8, max: 100 })
     .withMessage("Password must be between 8 and 100 characters"),
 
-  body("role")
+  body("roleId")
     .notEmpty()
-    .withMessage("Role is required")
-    .isIn(officerRoles)
-    .withMessage(`Role must be one of: ${officerRoles.join(", ")}`),
+    .withMessage("roleId is required")
+    .isUUID()
+    .withMessage("roleId must be a valid UUID"),
 
   body("status")
     .optional()
@@ -79,10 +72,7 @@ const updateOfficerValidation = [
     .isLength({ min: 8, max: 100 })
     .withMessage("Password must be between 8 and 100 characters"),
 
-  body("role")
-    .optional()
-    .isIn(officerRoles)
-    .withMessage(`Role must be one of: ${officerRoles.join(", ")}`),
+  body("roleId").optional().isUUID().withMessage("roleId must be a valid UUID"),
 
   body("status")
     .optional()
@@ -101,19 +91,24 @@ const officerIdParamValidation = [
 
 const officerListQueryValidation = [
   query("page").optional().isInt({ min: 1 }).withMessage("Page must be >= 1"),
+
   query("limit")
     .optional()
     .isInt({ min: 1, max: 100 })
     .withMessage("Limit must be between 1 and 100"),
+
   query("search").optional().isString().withMessage("Search must be a string"),
-  query("role")
+
+  query("roleId")
     .optional()
-    .isIn(officerRoles)
-    .withMessage(`Role must be one of: ${officerRoles.join(", ")}`),
+    .isUUID()
+    .withMessage("roleId must be a valid UUID"),
+
   query("status")
     .optional()
     .isIn(officerStatuses)
     .withMessage(`Status must be one of: ${officerStatuses.join(", ")}`),
+
   query("isActive")
     .optional()
     .isBoolean()
