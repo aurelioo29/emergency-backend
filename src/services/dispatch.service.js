@@ -8,6 +8,7 @@ const {
   ReportTrackingLog,
   User,
   Hospital,
+  Service,
 } = require("../models");
 const AppError = require("../utils/AppError");
 const {
@@ -23,30 +24,46 @@ class DispatchService {
       throw new AppError("Only admin can create dispatch", 403);
     }
 
-    const { reportId, officerId, ambulanceId, notes } = payload;
+    const {
+      reportId,
+      officerId,
+      ambulanceId,
+      notes,
+      autoAssigned = false,
+      assignmentOrder,
+      expiresAt,
+    } = payload;
 
-    if (!reportId) {
-      throw new AppError("reportId is required", 400);
-    }
-
-    const report = await EmergencyReport.findByPk(reportId);
+    const report = await EmergencyReport.findByPk(reportId, {
+      include: [
+        {
+          model: Service,
+          as: "service",
+          required: false,
+        },
+      ],
+    });
 
     if (!report) {
       throw new AppError("Emergency report not found", 404);
     }
 
-    if (["COMPLETED", "CANCELLED"].includes(report.status)) {
+    if (["COMPLETED", "CANCELLED", "FAILED"].includes(report.status)) {
       throw new AppError(
-        "Cannot create dispatch for completed or cancelled report",
+        "Cannot create dispatch for completed, cancelled, or failed report",
         400,
       );
+    }
+
+    if (!report.serviceId) {
+      throw new AppError("Report does not have serviceId yet", 400);
     }
 
     const existingActiveDispatch = await Dispatch.findOne({
       where: {
         reportId,
         dispatchStatus: {
-          [Op.notIn]: ["COMPLETED", "CANCELLED"],
+          [Op.notIn]: ["COMPLETED", "CANCELLED", "REJECTED", "EXPIRED"],
         },
       },
     });
@@ -93,14 +110,27 @@ class DispatchService {
       }
     }
 
+    const latestDispatch = await Dispatch.findOne({
+      where: { reportId },
+      order: [["assignmentOrder", "DESC"]],
+    });
+
+    const finalAssignmentOrder =
+      assignmentOrder ||
+      (latestDispatch ? latestDispatch.assignmentOrder + 1 : 1);
+
     const dispatch = await Dispatch.create({
       reportId,
+      serviceId: report.serviceId,
       officerId: officerId || null,
       ambulanceId: ambulanceId || null,
       assignedBy: authUser.id,
       assignedAt: new Date(),
       dispatchStatus: "ASSIGNED",
       notes: notes || null,
+      autoAssigned,
+      assignmentOrder: finalAssignmentOrder,
+      expiresAt: expiresAt || null,
     });
 
     await report.update({
@@ -132,6 +162,9 @@ class DispatchService {
       reportId: report.id,
       reportCode: report.reportCode,
       dispatchId: dispatch.id,
+      serviceId: report.serviceId,
+      serviceCode: report.service?.serviceCode || null,
+      serviceName: report.service?.serviceName || null,
       status: "ASSIGNED",
     });
 
@@ -140,22 +173,32 @@ class DispatchService {
         dispatchId: dispatch.id,
         reportId: report.id,
         reportCode: report.reportCode,
-        emergencyType: report.emergencyType,
+        serviceId: report.serviceId,
+        serviceCode: report.service?.serviceCode || null,
+        serviceName: report.service?.serviceName || null,
+        emergencyType: report.emergencyType, // fallback sementara
         officerId: officer.id,
+        autoAssigned,
+        assignmentOrder: finalAssignmentOrder,
+        expiresAt: dispatch.expiresAt,
       });
     }
 
     emitToAdminRoom("dispatch:created", {
       dispatchId: dispatch.id,
       reportId: report.id,
+      serviceId: report.serviceId,
       officerId: officerId || null,
       ambulanceId: ambulanceId || null,
       status: "ASSIGNED",
+      autoAssigned,
+      assignmentOrder: finalAssignmentOrder,
     });
 
     emitToReportRoom(report.id, "report:status_updated", {
       reportId: report.id,
       dispatchId: dispatch.id,
+      serviceId: report.serviceId,
       dispatchStatus: "ASSIGNED",
       reportStatus: "ASSIGNED",
     });
@@ -169,7 +212,28 @@ class DispatchService {
         {
           model: EmergencyReport,
           as: "report",
-          attributes: ["id", "reportCode", "status", "emergencyType", "userId"],
+          attributes: [
+            "id",
+            "reportCode",
+            "status",
+            "emergencyType",
+            "serviceId",
+            "userId",
+          ],
+          include: [
+            {
+              model: Service,
+              as: "service",
+              attributes: ["id", "serviceCode", "serviceName"],
+              required: false,
+            },
+          ],
+        },
+        {
+          model: Service,
+          as: "service",
+          attributes: ["id", "serviceCode", "serviceName"],
+          required: false,
         },
         {
           model: Officer,
@@ -202,10 +266,6 @@ class DispatchService {
   }
 
   static async getAllDispatches(authUser, query) {
-    // if (authUser.type !== "ADMIN") {
-    //   throw new AppError("Only admin can access all dispatches", 403);
-    // }
-
     const page = Number(query.page) > 0 ? Number(query.page) : 1;
     const limit = Number(query.limit) > 0 ? Number(query.limit) : 10;
     const offset = (page - 1) * limit;
@@ -228,14 +288,36 @@ class DispatchService {
       where.ambulanceId = query.ambulanceId;
     }
 
+    if (query.serviceId) {
+      where.serviceId = query.serviceId;
+    }
+
     const { count, rows } = await Dispatch.findAndCountAll({
       where,
       include: [
         {
+          model: Service,
+          as: "service",
+          attributes: ["id", "serviceCode", "serviceName"],
+          required: false,
+        },
+        {
           model: EmergencyReport,
           as: "report",
-          attributes: ["id", "reportCode", "status", "emergencyType"],
+          attributes: [
+            "id",
+            "reportCode",
+            "status",
+            "emergencyType",
+            "serviceId",
+          ],
           include: [
+            {
+              model: Service,
+              as: "service",
+              attributes: ["id", "serviceCode", "serviceName"],
+              required: false,
+            },
             {
               model: User,
               as: "user",
@@ -312,9 +394,29 @@ class DispatchService {
       where: { reportId },
       include: [
         {
+          model: Service,
+          as: "service",
+          attributes: ["id", "serviceCode", "serviceName"],
+          required: false,
+        },
+        {
           model: EmergencyReport,
           as: "report",
-          attributes: ["id", "reportCode", "status", "emergencyType"],
+          attributes: [
+            "id",
+            "reportCode",
+            "status",
+            "emergencyType",
+            "serviceId",
+          ],
+          include: [
+            {
+              model: Service,
+              as: "service",
+              attributes: ["id", "serviceCode", "serviceName"],
+              required: false,
+            },
+          ],
         },
         {
           model: Officer,
@@ -351,6 +453,8 @@ class DispatchService {
     const allowedStatuses = [
       "ASSIGNED",
       "ACCEPTED",
+      "REJECTED",
+      "EXPIRED",
       "ON_THE_WAY",
       "ARRIVED",
       "COMPLETED",
@@ -382,7 +486,16 @@ class DispatchService {
 
     if (dispatchStatus === "ACCEPTED" && !dispatch.acceptedAt) {
       updatePayload.acceptedAt = new Date();
-      reportStatus = "ASSIGNED";
+      reportStatus = "ACCEPTED";
+    }
+
+    if (dispatchStatus === "REJECTED") {
+      updatePayload.rejectedAt = new Date();
+      reportStatus = "REPORTED";
+    }
+
+    if (dispatchStatus === "EXPIRED") {
+      reportStatus = "REPORTED";
     }
 
     if (dispatchStatus === "ON_THE_WAY" && !dispatch.startedAt) {
@@ -391,6 +504,7 @@ class DispatchService {
     }
 
     if (dispatchStatus === "ARRIVED") {
+      updatePayload.arrivedAt = new Date();
       reportStatus = "ARRIVED";
     }
 
@@ -400,7 +514,8 @@ class DispatchService {
     }
 
     if (dispatchStatus === "CANCELLED") {
-      reportStatus = "REPORTED";
+      updatePayload.cancelledAt = new Date();
+      reportStatus = "CANCELLED";
     }
 
     await dispatch.update(updatePayload);
@@ -409,12 +524,20 @@ class DispatchService {
       status: reportStatus,
     };
 
+    if (reportStatus === "ACCEPTED") {
+      reportUpdatePayload.acceptedAt = new Date();
+    }
+
     if (reportStatus === "ARRIVED") {
       reportUpdatePayload.arrivedAt = new Date();
     }
 
     if (reportStatus === "COMPLETED") {
       reportUpdatePayload.completedAt = new Date();
+    }
+
+    if (reportStatus === "CANCELLED") {
+      reportUpdatePayload.cancelledAt = new Date();
     }
 
     await dispatch.report.update(reportUpdatePayload);
@@ -427,7 +550,9 @@ class DispatchService {
       updatedById: authUser.id,
     });
 
-    if (["COMPLETED", "CANCELLED"].includes(dispatchStatus)) {
+    if (
+      ["COMPLETED", "CANCELLED", "REJECTED", "EXPIRED"].includes(dispatchStatus)
+    ) {
       if (dispatch.officer) {
         await dispatch.officer.update({
           status: "AVAILABLE",
@@ -444,6 +569,7 @@ class DispatchService {
     emitToUser(dispatch.report.userId, "report:status_updated", {
       reportId: dispatch.report.id,
       dispatchId: dispatch.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus,
       reportStatus,
     });
@@ -452,6 +578,7 @@ class DispatchService {
       emitToOfficer(dispatch.officerId, "dispatch:status_updated", {
         dispatchId: dispatch.id,
         reportId: dispatch.report.id,
+        serviceId: dispatch.serviceId,
         dispatchStatus,
         reportStatus,
       });
@@ -460,6 +587,7 @@ class DispatchService {
     emitToAdminRoom("dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus,
       reportStatus,
     });
@@ -467,6 +595,7 @@ class DispatchService {
     emitToReportRoom(dispatch.report.id, "report:status_updated", {
       reportId: dispatch.report.id,
       dispatchId: dispatch.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus,
       reportStatus,
     });
@@ -513,9 +642,14 @@ class DispatchService {
       acceptedAt: new Date(),
     });
 
+    await dispatch.report.update({
+      status: "ACCEPTED",
+      acceptedAt: new Date(),
+    });
+
     await ReportTrackingLog.create({
       reportId: dispatch.report.id,
-      status: "ASSIGNED",
+      status: "ACCEPTED",
       notes: "Dispatch accepted by officer",
       updatedByType: "OFFICER",
       updatedById: authUser.id,
@@ -524,22 +658,25 @@ class DispatchService {
     emitToUser(dispatch.report.userId, "dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ACCEPTED",
-      reportStatus: dispatch.report.status,
+      reportStatus: "ACCEPTED",
     });
 
     emitToAdminRoom("dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ACCEPTED",
-      reportStatus: dispatch.report.status,
+      reportStatus: "ACCEPTED",
     });
 
     emitToReportRoom(dispatch.report.id, "dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ACCEPTED",
-      reportStatus: dispatch.report.status,
+      reportStatus: "ACCEPTED",
     });
 
     return await this.getDispatchById(dispatch.id);
@@ -562,19 +699,29 @@ class DispatchService {
       );
     }
 
+    const nextDispatchStatus =
+      dispatch.dispatchStatus === "ASSIGNED"
+        ? "ACCEPTED"
+        : dispatch.dispatchStatus;
+
     await dispatch.update({
       dispatchStatus: "ON_THE_WAY",
+      acceptedAt: dispatch.acceptedAt || new Date(),
       startedAt: new Date(),
     });
 
     await dispatch.report.update({
       status: "ON_THE_WAY",
+      acceptedAt: dispatch.report.acceptedAt || new Date(),
     });
 
     await ReportTrackingLog.create({
       reportId: dispatch.report.id,
       status: "ON_THE_WAY",
-      notes: "Officer is on the way",
+      notes:
+        nextDispatchStatus === "ASSIGNED"
+          ? "Officer accepted and is on the way"
+          : "Officer is on the way",
       updatedByType: "OFFICER",
       updatedById: authUser.id,
     });
@@ -582,6 +729,7 @@ class DispatchService {
     emitToUser(dispatch.report.userId, "dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ON_THE_WAY",
       reportStatus: "ON_THE_WAY",
     });
@@ -589,6 +737,7 @@ class DispatchService {
     emitToAdminRoom("dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ON_THE_WAY",
       reportStatus: "ON_THE_WAY",
     });
@@ -596,6 +745,7 @@ class DispatchService {
     emitToReportRoom(dispatch.report.id, "dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ON_THE_WAY",
       reportStatus: "ON_THE_WAY",
     });
@@ -619,6 +769,7 @@ class DispatchService {
 
     await dispatch.update({
       dispatchStatus: "ARRIVED",
+      arrivedAt: new Date(),
     });
 
     await dispatch.report.update({
@@ -637,6 +788,7 @@ class DispatchService {
     emitToUser(dispatch.report.userId, "dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ARRIVED",
       reportStatus: "ARRIVED",
     });
@@ -644,6 +796,7 @@ class DispatchService {
     emitToAdminRoom("dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ARRIVED",
       reportStatus: "ARRIVED",
     });
@@ -651,6 +804,7 @@ class DispatchService {
     emitToReportRoom(dispatch.report.id, "dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "ARRIVED",
       reportStatus: "ARRIVED",
     });
@@ -711,6 +865,7 @@ class DispatchService {
     emitToUser(dispatch.report.userId, "dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "COMPLETED",
       reportStatus: "COMPLETED",
     });
@@ -718,6 +873,7 @@ class DispatchService {
     emitToAdminRoom("dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "COMPLETED",
       reportStatus: "COMPLETED",
     });
@@ -725,6 +881,7 @@ class DispatchService {
     emitToReportRoom(dispatch.report.id, "dispatch:status_updated", {
       dispatchId: dispatch.id,
       reportId: dispatch.report.id,
+      serviceId: dispatch.serviceId,
       dispatchStatus: "COMPLETED",
       reportStatus: "COMPLETED",
     });

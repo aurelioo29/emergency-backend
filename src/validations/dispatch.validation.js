@@ -3,6 +3,8 @@ const { body, query, param } = require("express-validator");
 const dispatchStatuses = [
   "ASSIGNED",
   "ACCEPTED",
+  "REJECTED",
+  "EXPIRED",
   "ON_THE_WAY",
   "ARRIVED",
   "COMPLETED",
@@ -25,6 +27,21 @@ const createDispatchValidation = [
     .optional({ nullable: true })
     .isUUID()
     .withMessage("ambulanceId must be a valid UUID"),
+
+  body("autoAssigned")
+    .optional()
+    .isBoolean()
+    .withMessage("autoAssigned must be a boolean"),
+
+  body("assignmentOrder")
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage("assignmentOrder must be a positive integer"),
+
+  body("expiresAt")
+    .optional({ nullable: true })
+    .isISO8601()
+    .withMessage("expiresAt must be a valid ISO date"),
 
   body("notes")
     .optional({ nullable: true })
@@ -66,6 +83,11 @@ const allDispatchesQueryValidation = [
     .optional()
     .isUUID()
     .withMessage("ambulanceId must be a valid UUID"),
+
+  query("serviceId")
+    .optional()
+    .isUUID()
+    .withMessage("serviceId must be a valid UUID"),
 ];
 
 const dispatchIdParamValidation = [

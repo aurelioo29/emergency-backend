@@ -4,18 +4,25 @@ const emergencyTypes = ["SOS", "AMBULANCE", "FIRE", "CRIME"];
 const reportStatuses = [
   "REPORTED",
   "ASSIGNED",
+  "ACCEPTED",
   "ON_THE_WAY",
   "ARRIVED",
   "HANDLING",
   "COMPLETED",
   "CANCELLED",
+  "FAILED",
 ];
 
 const createEmergencyReportValidation = [
-  body("emergencyType")
+  body("serviceId")
     .notEmpty()
-    .withMessage("Emergency type is required")
-    .isIn(["SOS", "AMBULANCE", "FIRE", "CRIME"])
+    .withMessage("serviceId is required")
+    .isUUID()
+    .withMessage("serviceId must be a valid UUID"),
+
+  body("emergencyType")
+    .optional()
+    .isIn(emergencyTypes)
     .withMessage("Emergency type is invalid"),
 
   body("description")
@@ -70,6 +77,11 @@ const myReportsQueryValidation = [
     .optional()
     .isIn(emergencyTypes)
     .withMessage(`Emergency type must be one of: ${emergencyTypes.join(", ")}`),
+
+  query("serviceId")
+    .optional()
+    .isUUID()
+    .withMessage("serviceId must be a valid UUID"),
 ];
 
 const allReportsQueryValidation = [
@@ -92,6 +104,11 @@ const allReportsQueryValidation = [
     .optional()
     .isIn(emergencyTypes)
     .withMessage(`Emergency type must be one of: ${emergencyTypes.join(", ")}`),
+
+  query("serviceId")
+    .optional()
+    .isUUID()
+    .withMessage("serviceId must be a valid UUID"),
 
   query("search")
     .optional()
