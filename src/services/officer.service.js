@@ -3,7 +3,7 @@ const { Officer, Role, OfficerService, Service } = require("../models");
 const AppError = require("../utils/AppError");
 const { hashPassword } = require("../utils/hash");
 
-class OfficerService {
+class OfficerServiceService {
   static async create(payload) {
     const existingEmail = await Officer.findOne({
       where: { email: payload.email },
@@ -290,4 +290,4 @@ class OfficerService {
   }
 }
 
-module.exports = OfficerService;
+module.exports = OfficerServiceService;
