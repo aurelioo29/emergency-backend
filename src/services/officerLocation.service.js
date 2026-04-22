@@ -51,48 +51,48 @@ class OfficerLocationService {
       order: [["assignedAt", "DESC"]],
     });
 
-    if (!activeDispatch) {
-      throw new AppError("No active dispatch found for this officer", 400);
-    }
-
-    if (reportId && reportId !== activeDispatch.reportId) {
+    if (reportId && activeDispatch && reportId !== activeDispatch.reportId) {
       throw new AppError("Invalid reportId for this officer", 400);
     }
 
+    const finalReportId = activeDispatch ? activeDispatch.reportId : null;
+
     const location = await OfficerLocation.create({
       officerId: authUser.id,
-      reportId: activeDispatch.reportId,
+      reportId: finalReportId,
       latitude: parsedLatitude,
       longitude: parsedLongitude,
       recordedAt: new Date(),
     });
 
-    emitToUser(activeDispatch.report.userId, "officer:location_updated", {
-      reportId: activeDispatch.reportId,
-      officerId: authUser.id,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      recordedAt: location.recordedAt,
-    });
+    if (activeDispatch) {
+      emitToUser(activeDispatch.report.userId, "officer:location_updated", {
+        reportId: activeDispatch.reportId,
+        officerId: authUser.id,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        recordedAt: location.recordedAt,
+      });
+
+      emitToAdminRoom("officer:location_updated", {
+        reportId: activeDispatch.reportId,
+        officerId: authUser.id,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        recordedAt: location.recordedAt,
+      });
+
+      emitToReportRoom(activeDispatch.reportId, "officer:location_updated", {
+        reportId: activeDispatch.reportId,
+        officerId: authUser.id,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        recordedAt: location.recordedAt,
+      });
+    }
 
     emitToOfficer(authUser.id, "officer:location_updated", {
-      reportId: activeDispatch.reportId,
-      officerId: authUser.id,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      recordedAt: location.recordedAt,
-    });
-
-    emitToAdminRoom("officer:location_updated", {
-      reportId: activeDispatch.reportId,
-      officerId: authUser.id,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      recordedAt: location.recordedAt,
-    });
-
-    emitToReportRoom(activeDispatch.reportId, "officer:location_updated", {
-      reportId: activeDispatch.reportId,
+      reportId: finalReportId,
       officerId: authUser.id,
       latitude: location.latitude,
       longitude: location.longitude,

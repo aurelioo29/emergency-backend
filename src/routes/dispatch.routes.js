@@ -11,6 +11,7 @@ const {
   dispatchReportIdParamValidation,
   updateDispatchStatusValidation,
   completeDispatchValidation,
+  rejectDispatchValidation,
 } = require("../validations/dispatch.validation");
 
 router.use(authMiddleware);
@@ -30,6 +31,13 @@ router.patch(
   updateDispatchStatusValidation,
   validate,
   DispatchController.updateStatus,
+);
+
+router.patch(
+  "/:id/reject",
+  rejectDispatchValidation,
+  validate,
+  DispatchController.reject,
 );
 
 // shared

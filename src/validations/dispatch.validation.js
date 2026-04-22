@@ -11,6 +11,16 @@ const dispatchStatuses = [
   "CANCELLED",
 ];
 
+const rejectDispatchValidation = [
+  param("id").isUUID().withMessage("Dispatch id must be a valid UUID"),
+  body("notes")
+    .optional({ nullable: true })
+    .isString()
+    .withMessage("Notes must be a string")
+    .isLength({ max: 1000 })
+    .withMessage("Notes must not exceed 1000 characters"),
+];
+
 const createDispatchValidation = [
   body("reportId")
     .notEmpty()
@@ -135,4 +145,5 @@ module.exports = {
   dispatchReportIdParamValidation,
   updateDispatchStatusValidation,
   completeDispatchValidation,
+  rejectDispatchValidation,
 };

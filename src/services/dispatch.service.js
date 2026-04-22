@@ -9,6 +9,8 @@ const {
   User,
   Hospital,
   Service,
+  OfficerService,
+  OfficerLocation,
 } = require("../models");
 const AppError = require("../utils/AppError");
 const {
@@ -17,6 +19,7 @@ const {
   emitToOfficer,
   emitToReportRoom,
 } = require("../socket/emitter");
+const { calculateDistanceKm } = require("../utils/distance");
 
 class DispatchService {
   static async createDispatch(authUser, payload) {
@@ -204,6 +207,437 @@ class DispatchService {
     });
 
     return await this.getDispatchById(dispatch.id);
+  }
+
+  static async getTriedOfficerIds(reportId) {
+    const previousDispatches = await Dispatch.findAll({
+      where: {
+        reportId,
+        officerId: {
+          [Op.not]: null,
+        },
+      },
+      attributes: ["officerId"],
+    });
+
+    return [...new Set(previousDispatches.map((item) => item.officerId))];
+  }
+
+  static async findNearestAvailableOfficer(report, excludedOfficerIds = []) {
+    const officerWhere = {
+      status: "AVAILABLE",
+      isActive: true,
+    };
+
+    if (excludedOfficerIds.length > 0) {
+      officerWhere.id = {
+        [Op.notIn]: excludedOfficerIds,
+      };
+    }
+
+    const officerServices = await OfficerService.findAll({
+      where: {
+        serviceId: report.serviceId,
+      },
+      include: [
+        {
+          model: Officer,
+          as: "officer",
+          required: true,
+          where: officerWhere,
+        },
+        {
+          model: Service,
+          as: "service",
+          required: true,
+        },
+      ],
+    });
+
+    if (!officerServices.length) {
+      return null;
+    }
+
+    const officerIds = officerServices.map((item) => item.officerId);
+
+    const latestLocationsRaw = await OfficerLocation.findAll({
+      where: {
+        officerId: {
+          [Op.in]: officerIds,
+        },
+      },
+      order: [
+        ["officerId", "ASC"],
+        ["recordedAt", "DESC"],
+      ],
+    });
+
+    const latestLocationMap = new Map();
+
+    for (const location of latestLocationsRaw) {
+      if (!latestLocationMap.has(location.officerId)) {
+        latestLocationMap.set(location.officerId, location);
+      }
+    }
+
+    let nearest = null;
+
+    for (const officerService of officerServices) {
+      const officer = officerService.officer;
+      const location = latestLocationMap.get(officer.id);
+
+      if (!location) {
+        continue;
+      }
+
+      const distanceKm = calculateDistanceKm(
+        Number(report.latitude),
+        Number(report.longitude),
+        Number(location.latitude),
+        Number(location.longitude),
+      );
+
+      if (!nearest) {
+        nearest = {
+          officer,
+          service: officerService.service,
+          location,
+          distanceKm,
+          isPrimary: officerService.isPrimary,
+        };
+        continue;
+      }
+
+      // Prioritaskan isPrimary kalau jaraknya mirip? Bisa.
+      // Untuk sekarang kita pakai jarak paling dekat murni.
+      if (distanceKm < nearest.distanceKm) {
+        nearest = {
+          officer,
+          service: officerService.service,
+          location,
+          distanceKm,
+          isPrimary: officerService.isPrimary,
+        };
+      }
+    }
+
+    return nearest;
+  }
+
+  static async autoAssignNearestOfficer(report, options = {}) {
+    const { excludedOfficerIds = [] } = options;
+
+    const fullReport = await EmergencyReport.findByPk(report.id, {
+      include: [
+        {
+          model: Service,
+          as: "service",
+          required: false,
+        },
+      ],
+    });
+
+    if (!fullReport) {
+      throw new AppError("Emergency report not found", 404);
+    }
+
+    if (!fullReport.serviceId) {
+      throw new AppError("Report does not have serviceId", 400);
+    }
+
+    if (!fullReport.service) {
+      throw new AppError("Service not found on report", 400);
+    }
+
+    if (!fullReport.service.requiresDispatch) {
+      return {
+        autoAssigned: false,
+        reason: "THIS_SERVICE_DOES_NOT_REQUIRE_DISPATCH",
+      };
+    }
+
+    const existingActiveDispatch = await Dispatch.findOne({
+      where: {
+        reportId: fullReport.id,
+        dispatchStatus: {
+          [Op.notIn]: ["COMPLETED", "CANCELLED", "REJECTED", "EXPIRED"],
+        },
+      },
+    });
+
+    if (existingActiveDispatch) {
+      return {
+        autoAssigned: false,
+        reason: "ACTIVE_DISPATCH_ALREADY_EXISTS",
+        dispatchId: existingActiveDispatch.id,
+      };
+    }
+
+    const triedOfficerIds = await this.getTriedOfficerIds(fullReport.id);
+    const finalExcludedOfficerIds = [
+      ...new Set([...triedOfficerIds, ...excludedOfficerIds]),
+    ];
+
+    const nearestOfficerData = await this.findNearestAvailableOfficer(
+      fullReport,
+      finalExcludedOfficerIds,
+    );
+
+    if (!nearestOfficerData) {
+      await fullReport.update({
+        status: "FAILED",
+        failedAt: new Date(),
+      });
+
+      await ReportTrackingLog.create({
+        reportId: fullReport.id,
+        status: "FAILED",
+        notes: "No available officer found for this service",
+        updatedByType: "SYSTEM",
+        updatedById: null,
+      });
+
+      emitToAdminRoom("dispatch:auto_assign_failed", {
+        reportId: fullReport.id,
+        reportCode: fullReport.reportCode,
+        serviceId: fullReport.serviceId,
+        serviceCode: fullReport.service.serviceCode,
+        reason: "NO_AVAILABLE_OFFICER",
+      });
+
+      emitToUser(fullReport.userId, "dispatch:auto_assign_failed", {
+        reportId: fullReport.id,
+        reportCode: fullReport.reportCode,
+        serviceId: fullReport.serviceId,
+        serviceCode: fullReport.service.serviceCode,
+        reason: "NO_AVAILABLE_OFFICER",
+      });
+
+      return {
+        autoAssigned: false,
+        reason: "NO_AVAILABLE_OFFICER",
+      };
+    }
+
+    const latestDispatch = await Dispatch.findOne({
+      where: { reportId: fullReport.id },
+      order: [["assignmentOrder", "DESC"]],
+    });
+
+    const assignmentOrder = latestDispatch
+      ? latestDispatch.assignmentOrder + 1
+      : 1;
+
+    const expiresAt =
+      fullReport.service.autoAcceptMode === "CONFIRM"
+        ? new Date(Date.now() + fullReport.service.acceptTimeoutSeconds * 1000)
+        : null;
+
+    const initialDispatchStatus =
+      fullReport.service.autoAcceptMode === "FULL_AUTO"
+        ? "ACCEPTED"
+        : "ASSIGNED";
+
+    const dispatch = await Dispatch.create({
+      reportId: fullReport.id,
+      serviceId: fullReport.serviceId,
+      officerId: nearestOfficerData.officer.id,
+      ambulanceId: null,
+      assignedBy: null,
+      assignedAt: new Date(),
+      acceptedAt: initialDispatchStatus === "ACCEPTED" ? new Date() : null,
+      dispatchStatus: initialDispatchStatus,
+      autoAssigned: true,
+      assignmentOrder,
+      expiresAt,
+      notes: `Auto assigned by system. Distance ${nearestOfficerData.distanceKm.toFixed(
+        2,
+      )} km`,
+    });
+
+    await fullReport.update({
+      status: initialDispatchStatus === "ACCEPTED" ? "ACCEPTED" : "ASSIGNED",
+      assignedAt: new Date(),
+      acceptedAt: initialDispatchStatus === "ACCEPTED" ? new Date() : null,
+      failedAt: null,
+    });
+
+    await nearestOfficerData.officer.update({
+      status: "ON_DUTY",
+    });
+
+    await ReportTrackingLog.create({
+      reportId: fullReport.id,
+      status: initialDispatchStatus === "ACCEPTED" ? "ACCEPTED" : "ASSIGNED",
+      notes: `Auto assigned to officer ${nearestOfficerData.officer.fullName} (${nearestOfficerData.distanceKm.toFixed(
+        2,
+      )} km)`,
+      updatedByType: "SYSTEM",
+      updatedById: null,
+    });
+
+    emitToUser(fullReport.userId, "dispatch:assigned", {
+      reportId: fullReport.id,
+      reportCode: fullReport.reportCode,
+      dispatchId: dispatch.id,
+      serviceId: fullReport.serviceId,
+      serviceCode: fullReport.service.serviceCode,
+      serviceName: fullReport.service.serviceName,
+      status: initialDispatchStatus,
+      officerId: nearestOfficerData.officer.id,
+      officerName: nearestOfficerData.officer.fullName,
+      distanceKm: nearestOfficerData.distanceKm,
+      expiresAt,
+    });
+
+    emitToOfficer(nearestOfficerData.officer.id, "dispatch:new", {
+      dispatchId: dispatch.id,
+      reportId: fullReport.id,
+      reportCode: fullReport.reportCode,
+      serviceId: fullReport.serviceId,
+      serviceCode: fullReport.service.serviceCode,
+      serviceName: fullReport.service.serviceName,
+      officerId: nearestOfficerData.officer.id,
+      officerName: nearestOfficerData.officer.fullName,
+      distanceKm: nearestOfficerData.distanceKm,
+      autoAssigned: true,
+      assignmentOrder,
+      expiresAt,
+      dispatchStatus: initialDispatchStatus,
+    });
+
+    emitToAdminRoom("dispatch:auto_assigned", {
+      dispatchId: dispatch.id,
+      reportId: fullReport.id,
+      reportCode: fullReport.reportCode,
+      serviceId: fullReport.serviceId,
+      officerId: nearestOfficerData.officer.id,
+      officerName: nearestOfficerData.officer.fullName,
+      distanceKm: nearestOfficerData.distanceKm,
+      dispatchStatus: initialDispatchStatus,
+      assignmentOrder,
+      expiresAt,
+    });
+
+    emitToReportRoom(fullReport.id, "report:status_updated", {
+      reportId: fullReport.id,
+      dispatchId: dispatch.id,
+      serviceId: fullReport.serviceId,
+      dispatchStatus: initialDispatchStatus,
+      reportStatus:
+        initialDispatchStatus === "ACCEPTED" ? "ACCEPTED" : "ASSIGNED",
+    });
+
+    return await this.getDispatchById(dispatch.id);
+  }
+
+  static async reassignNextNearestOfficer(reportId) {
+    const report = await EmergencyReport.findByPk(reportId);
+
+    if (!report) {
+      throw new AppError("Emergency report not found", 404);
+    }
+
+    return await this.autoAssignNearestOfficer(report);
+  }
+
+  static async expireDispatch(dispatchId) {
+    const dispatch = await Dispatch.findByPk(dispatchId, {
+      include: [
+        { model: EmergencyReport, as: "report" },
+        { model: Officer, as: "officer", required: false },
+      ],
+    });
+
+    if (!dispatch) {
+      throw new AppError("Dispatch not found", 404);
+    }
+
+    if (dispatch.dispatchStatus !== "ASSIGNED") {
+      return dispatch;
+    }
+
+    await dispatch.update({
+      dispatchStatus: "EXPIRED",
+    });
+
+    if (dispatch.officer) {
+      await dispatch.officer.update({
+        status: "AVAILABLE",
+      });
+    }
+
+    await dispatch.report.update({
+      status: "REPORTED",
+    });
+
+    await ReportTrackingLog.create({
+      reportId: dispatch.report.id,
+      status: "REPORTED",
+      notes: "Dispatch expired, reassigning next nearest officer",
+      updatedByType: "SYSTEM",
+      updatedById: null,
+    });
+
+    emitToAdminRoom("dispatch:expired", {
+      dispatchId: dispatch.id,
+      reportId: dispatch.report.id,
+      officerId: dispatch.officerId,
+      serviceId: dispatch.serviceId,
+    });
+
+    return await this.reassignNextNearestOfficer(dispatch.report.id);
+  }
+
+  static async rejectDispatch(authUser, dispatchId, payload = {}) {
+    if (authUser.type !== "OFFICER") {
+      throw new AppError("Only officer can reject dispatch", 403);
+    }
+
+    const dispatch = await this.getOfficerOwnedDispatch(
+      authUser.id,
+      dispatchId,
+    );
+
+    if (dispatch.dispatchStatus !== "ASSIGNED") {
+      throw new AppError("Only ASSIGNED dispatch can be rejected", 400);
+    }
+
+    await dispatch.update({
+      dispatchStatus: "REJECTED",
+      rejectedAt: new Date(),
+      notes: payload.notes || dispatch.notes,
+    });
+
+    await dispatch.report.update({
+      status: "REPORTED",
+      acceptedAt: null,
+    });
+
+    if (dispatch.officer) {
+      await dispatch.officer.update({
+        status: "AVAILABLE",
+      });
+    }
+
+    await ReportTrackingLog.create({
+      reportId: dispatch.report.id,
+      status: "REPORTED",
+      notes:
+        payload.notes ||
+        "Dispatch rejected by officer, trying next nearest officer",
+      updatedByType: "OFFICER",
+      updatedById: authUser.id,
+    });
+
+    emitToAdminRoom("dispatch:rejected", {
+      dispatchId: dispatch.id,
+      reportId: dispatch.report.id,
+      officerId: dispatch.officerId,
+      serviceId: dispatch.serviceId,
+    });
+
+    return await this.reassignNextNearestOfficer(dispatch.report.id);
   }
 
   static async getDispatchById(dispatchId) {

@@ -12,6 +12,7 @@ const {
 const AppError = require("../utils/AppError");
 const { Op } = require("sequelize");
 const { emitToAdminRoom, emitToUser } = require("../socket/emitter");
+const DispatchService = require("./dispatch.service");
 
 class EmergencyReportService {
   static generateReportCode() {
@@ -112,7 +113,21 @@ class EmergencyReportService {
       status: report.status,
     });
 
-    return await this.getReportDetail(authUser, report.id);
+    let autoDispatchResult = null;
+
+    try {
+      autoDispatchResult =
+        await DispatchService.autoAssignNearestOfficer(report);
+    } catch (error) {
+      console.error("Auto assign nearest officer failed:", error.message);
+    }
+
+    const reportDetail = await this.getReportDetail(authUser, report.id);
+
+    return {
+      report: reportDetail,
+      autoDispatch: autoDispatchResult,
+    };
   }
 
   static async getMyReports(authUser, query) {

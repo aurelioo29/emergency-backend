@@ -130,6 +130,23 @@ class DispatchController {
       next(error);
     }
   }
+
+  static async reject(req, res, next) {
+    try {
+      const result = await DispatchService.rejectDispatch(
+        req.user,
+        req.params.id,
+        req.body,
+      );
+
+      return sendSuccess(res, {
+        message: "Dispatch rejected successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = DispatchController;
