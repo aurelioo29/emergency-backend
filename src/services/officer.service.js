@@ -1,5 +1,5 @@
 const { Op } = require("sequelize");
-const { Officer } = require("../models");
+const { Officer, Role, OfficerService, Service } = require("../models");
 const AppError = require("../utils/AppError");
 const { hashPassword } = require("../utils/hash");
 
@@ -23,6 +23,16 @@ class OfficerService {
       }
     }
 
+    const roleDetail = await Role.findByPk(payload.roleId);
+
+    if (!roleDetail) {
+      throw new AppError("Role not found", 404);
+    }
+
+    if (!roleDetail.isActive) {
+      throw new AppError("Role is inactive", 400);
+    }
+
     const passwordHash = await hashPassword(payload.password);
 
     const officer = await Officer.create({
@@ -30,12 +40,23 @@ class OfficerService {
       phoneNumber: payload.phoneNumber || null,
       email: payload.email,
       passwordHash,
-      role: payload.role,
+      roleId: roleDetail.id,
+      role: roleDetail.roleCode, // fallback legacy sementara
       status: payload.status || "AVAILABLE",
       isActive: payload.isActive !== undefined ? payload.isActive : true,
     });
 
-    return officer;
+    return await Officer.findByPk(officer.id, {
+      attributes: { exclude: ["passwordHash"] },
+      include: [
+        {
+          model: Role,
+          as: "roleDetail",
+          attributes: ["id", "roleCode", "roleName", "isActive"],
+          required: false,
+        },
+      ],
+    });
   }
 
   static async getAll(query) {
@@ -53,8 +74,8 @@ class OfficerService {
       ];
     }
 
-    if (query.role) {
-      where.role = query.role;
+    if (query.roleId) {
+      where.roleId = query.roleId;
     }
 
     if (query.status) {
@@ -68,9 +89,31 @@ class OfficerService {
     const { count, rows } = await Officer.findAndCountAll({
       where,
       attributes: { exclude: ["passwordHash"] },
+      include: [
+        {
+          model: Role,
+          as: "roleDetail",
+          attributes: ["id", "roleCode", "roleName", "isActive"],
+          required: false,
+        },
+        {
+          model: OfficerService,
+          as: "officerServices",
+          required: false,
+          include: [
+            {
+              model: Service,
+              as: "service",
+              attributes: ["id", "serviceCode", "serviceName", "isActive"],
+              required: false,
+            },
+          ],
+        },
+      ],
       order: [["createdAt", "DESC"]],
       limit,
       offset,
+      distinct: true,
     });
 
     return {
@@ -87,6 +130,35 @@ class OfficerService {
   static async getById(id) {
     const officer = await Officer.findByPk(id, {
       attributes: { exclude: ["passwordHash"] },
+      include: [
+        {
+          model: Role,
+          as: "roleDetail",
+          attributes: ["id", "roleCode", "roleName", "description", "isActive"],
+          required: false,
+        },
+        {
+          model: OfficerService,
+          as: "officerServices",
+          required: false,
+          include: [
+            {
+              model: Service,
+              as: "service",
+              attributes: [
+                "id",
+                "serviceCode",
+                "serviceName",
+                "requiresDispatch",
+                "autoAcceptMode",
+                "acceptTimeoutSeconds",
+                "isActive",
+              ],
+              required: false,
+            },
+          ],
+        },
+      ],
     });
 
     if (!officer) {
@@ -123,6 +195,20 @@ class OfficerService {
       }
     }
 
+    let roleDetail = null;
+
+    if (payload.roleId !== undefined) {
+      roleDetail = await Role.findByPk(payload.roleId);
+
+      if (!roleDetail) {
+        throw new AppError("Role not found", 404);
+      }
+
+      if (!roleDetail.isActive) {
+        throw new AppError("Role is inactive", 400);
+      }
+    }
+
     const updatePayload = {
       ...(payload.fullName !== undefined && {
         fullName: payload.fullName,
@@ -133,9 +219,6 @@ class OfficerService {
       ...(payload.email !== undefined && {
         email: payload.email,
       }),
-      ...(payload.role !== undefined && {
-        role: payload.role,
-      }),
       ...(payload.status !== undefined && {
         status: payload.status,
       }),
@@ -143,6 +226,11 @@ class OfficerService {
         isActive: payload.isActive,
       }),
     };
+
+    if (roleDetail) {
+      updatePayload.roleId = roleDetail.id;
+      updatePayload.role = roleDetail.roleCode; // fallback legacy sementara
+    }
 
     if (payload.password) {
       updatePayload.passwordHash = await hashPassword(payload.password);
@@ -152,6 +240,27 @@ class OfficerService {
 
     return await Officer.findByPk(id, {
       attributes: { exclude: ["passwordHash"] },
+      include: [
+        {
+          model: Role,
+          as: "roleDetail",
+          attributes: ["id", "roleCode", "roleName", "isActive"],
+          required: false,
+        },
+        {
+          model: OfficerService,
+          as: "officerServices",
+          required: false,
+          include: [
+            {
+              model: Service,
+              as: "service",
+              attributes: ["id", "serviceCode", "serviceName", "isActive"],
+              required: false,
+            },
+          ],
+        },
+      ],
     });
   }
 
@@ -169,6 +278,14 @@ class OfficerService {
 
     return await Officer.findByPk(id, {
       attributes: { exclude: ["passwordHash"] },
+      include: [
+        {
+          model: Role,
+          as: "roleDetail",
+          attributes: ["id", "roleCode", "roleName", "isActive"],
+          required: false,
+        },
+      ],
     });
   }
 }
