@@ -22,6 +22,87 @@ const {
 const { calculateDistanceKm } = require("../utils/distance");
 
 class DispatchService {
+  static buildDispatchRealtimePayload({
+    dispatch,
+    report,
+    officer = null,
+    ambulance = null,
+    extra = {},
+  }) {
+    return {
+      dispatchId: dispatch?.id || null,
+      reportId: report?.id || null,
+      reportCode: report?.reportCode || null,
+      serviceId: dispatch?.serviceId || report?.serviceId || null,
+      serviceCode: report?.service?.serviceCode || null,
+      serviceName: report?.service?.serviceName || null,
+      dispatchStatus: dispatch?.dispatchStatus || null,
+      reportStatus: report?.status || null,
+      officerId: officer?.id || dispatch?.officerId || null,
+      officerName: officer?.fullName || null,
+      ambulanceId: ambulance?.id || dispatch?.ambulanceId || null,
+      updatedAt: new Date(),
+      ...extra,
+    };
+  }
+
+  static emitDispatchUpdated({
+    dispatch,
+    report,
+    officer = null,
+    ambulance = null,
+    extra = {},
+  }) {
+    const payload = this.buildDispatchRealtimePayload({
+      dispatch,
+      report,
+      officer,
+      ambulance,
+      extra,
+    });
+
+    emitToAdminRoom("dispatch:updated", payload);
+
+    if (report?.userId) {
+      emitToUser(report.userId, "dispatch:updated", payload);
+    }
+
+    if (officer?.id || dispatch?.officerId) {
+      emitToOfficer(
+        officer?.id || dispatch.officerId,
+        "dispatch:updated",
+        payload,
+      );
+    }
+
+    if (report?.id) {
+      emitToReportRoom(report.id, "dispatch:updated", payload);
+    }
+  }
+
+  static emitDispatchFailed({ report, reason, extra = {} }) {
+    const payload = {
+      reportId: report?.id || null,
+      reportCode: report?.reportCode || null,
+      serviceId: report?.serviceId || null,
+      serviceCode: report?.service?.serviceCode || null,
+      serviceName: report?.service?.serviceName || null,
+      reason,
+      updatedAt: new Date(),
+      ...extra,
+    };
+
+    emitToAdminRoom("dispatch:failed", payload);
+
+    if (report?.userId) {
+      emitToUser(report.userId, "dispatch:failed", payload);
+    }
+
+    if (report?.id) {
+      emitToReportRoom(report.id, "dispatch:failed", payload);
+    }
+  }
+
   static async createDispatch(authUser, payload) {
     if (authUser.type !== "ADMIN") {
       throw new AppError("Only admin can create dispatch", 403);
@@ -161,49 +242,16 @@ class DispatchService {
       });
     }
 
-    emitToUser(report.userId, "dispatch:assigned", {
-      reportId: report.id,
-      reportCode: report.reportCode,
-      dispatchId: dispatch.id,
-      serviceId: report.serviceId,
-      serviceCode: report.service?.serviceCode || null,
-      serviceName: report.service?.serviceName || null,
-      status: "ASSIGNED",
-    });
-
-    if (officer) {
-      emitToOfficer(officer.id, "dispatch:new", {
-        dispatchId: dispatch.id,
-        reportId: report.id,
-        reportCode: report.reportCode,
-        serviceId: report.serviceId,
-        serviceCode: report.service?.serviceCode || null,
-        serviceName: report.service?.serviceName || null,
-        emergencyType: report.emergencyType, // fallback sementara
-        officerId: officer.id,
-        autoAssigned,
+    this.emitDispatchUpdated({
+      dispatch,
+      report,
+      officer,
+      ambulance,
+      extra: {
         assignmentOrder: finalAssignmentOrder,
+        autoAssigned,
         expiresAt: dispatch.expiresAt,
-      });
-    }
-
-    emitToAdminRoom("dispatch:created", {
-      dispatchId: dispatch.id,
-      reportId: report.id,
-      serviceId: report.serviceId,
-      officerId: officerId || null,
-      ambulanceId: ambulanceId || null,
-      status: "ASSIGNED",
-      autoAssigned,
-      assignmentOrder: finalAssignmentOrder,
-    });
-
-    emitToReportRoom(report.id, "report:status_updated", {
-      reportId: report.id,
-      dispatchId: dispatch.id,
-      serviceId: report.serviceId,
-      dispatchStatus: "ASSIGNED",
-      reportStatus: "ASSIGNED",
+      },
     });
 
     return await this.getDispatchById(dispatch.id);
@@ -308,8 +356,6 @@ class DispatchService {
         continue;
       }
 
-      // Prioritaskan isPrimary kalau jaraknya mirip? Bisa.
-      // Untuk sekarang kita pakai jarak paling dekat murni.
       if (distanceKm < nearest.distanceKm) {
         nearest = {
           officer,
@@ -397,19 +443,8 @@ class DispatchService {
         updatedById: null,
       });
 
-      emitToAdminRoom("dispatch:auto_assign_failed", {
-        reportId: fullReport.id,
-        reportCode: fullReport.reportCode,
-        serviceId: fullReport.serviceId,
-        serviceCode: fullReport.service.serviceCode,
-        reason: "NO_AVAILABLE_OFFICER",
-      });
-
-      emitToUser(fullReport.userId, "dispatch:auto_assign_failed", {
-        reportId: fullReport.id,
-        reportCode: fullReport.reportCode,
-        serviceId: fullReport.serviceId,
-        serviceCode: fullReport.service.serviceCode,
+      this.emitDispatchFailed({
+        report: fullReport,
         reason: "NO_AVAILABLE_OFFICER",
       });
 
@@ -476,56 +511,17 @@ class DispatchService {
       updatedById: null,
     });
 
-    emitToUser(fullReport.userId, "dispatch:assigned", {
-      reportId: fullReport.id,
-      reportCode: fullReport.reportCode,
-      dispatchId: dispatch.id,
-      serviceId: fullReport.serviceId,
-      serviceCode: fullReport.service.serviceCode,
-      serviceName: fullReport.service.serviceName,
-      status: initialDispatchStatus,
-      officerId: nearestOfficerData.officer.id,
-      officerName: nearestOfficerData.officer.fullName,
-      distanceKm: nearestOfficerData.distanceKm,
-      expiresAt,
-    });
-
-    emitToOfficer(nearestOfficerData.officer.id, "dispatch:new", {
-      dispatchId: dispatch.id,
-      reportId: fullReport.id,
-      reportCode: fullReport.reportCode,
-      serviceId: fullReport.serviceId,
-      serviceCode: fullReport.service.serviceCode,
-      serviceName: fullReport.service.serviceName,
-      officerId: nearestOfficerData.officer.id,
-      officerName: nearestOfficerData.officer.fullName,
-      distanceKm: nearestOfficerData.distanceKm,
-      autoAssigned: true,
-      assignmentOrder,
-      expiresAt,
-      dispatchStatus: initialDispatchStatus,
-    });
-
-    emitToAdminRoom("dispatch:auto_assigned", {
-      dispatchId: dispatch.id,
-      reportId: fullReport.id,
-      reportCode: fullReport.reportCode,
-      serviceId: fullReport.serviceId,
-      officerId: nearestOfficerData.officer.id,
-      officerName: nearestOfficerData.officer.fullName,
-      distanceKm: nearestOfficerData.distanceKm,
-      dispatchStatus: initialDispatchStatus,
-      assignmentOrder,
-      expiresAt,
-    });
-
-    emitToReportRoom(fullReport.id, "report:status_updated", {
-      reportId: fullReport.id,
-      dispatchId: dispatch.id,
-      serviceId: fullReport.serviceId,
-      dispatchStatus: initialDispatchStatus,
-      reportStatus:
-        initialDispatchStatus === "ACCEPTED" ? "ACCEPTED" : "ASSIGNED",
+    this.emitDispatchUpdated({
+      dispatch,
+      report: fullReport,
+      officer: nearestOfficerData.officer,
+      ambulance: null,
+      extra: {
+        assignmentOrder,
+        autoAssigned: true,
+        expiresAt,
+        distanceKm: nearestOfficerData.distanceKm,
+      },
     });
 
     return await this.getDispatchById(dispatch.id);
@@ -544,7 +540,17 @@ class DispatchService {
   static async expireDispatch(dispatchId) {
     const dispatch = await Dispatch.findByPk(dispatchId, {
       include: [
-        { model: EmergencyReport, as: "report" },
+        {
+          model: EmergencyReport,
+          as: "report",
+          include: [
+            {
+              model: Service,
+              as: "service",
+              required: false,
+            },
+          ],
+        },
         { model: Officer, as: "officer", required: false },
       ],
     });
@@ -569,6 +575,7 @@ class DispatchService {
 
     await dispatch.report.update({
       status: "REPORTED",
+      acceptedAt: null,
     });
 
     await ReportTrackingLog.create({
@@ -579,11 +586,14 @@ class DispatchService {
       updatedById: null,
     });
 
-    emitToAdminRoom("dispatch:expired", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      officerId: dispatch.officerId,
-      serviceId: dispatch.serviceId,
+    this.emitDispatchUpdated({
+      dispatch,
+      report: dispatch.report,
+      officer: dispatch.officer,
+      ambulance: null,
+      extra: {
+        reason: "DISPATCH_EXPIRED",
+      },
     });
 
     return await this.reassignNextNearestOfficer(dispatch.report.id);
@@ -630,11 +640,14 @@ class DispatchService {
       updatedById: authUser.id,
     });
 
-    emitToAdminRoom("dispatch:rejected", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      officerId: dispatch.officerId,
-      serviceId: dispatch.serviceId,
+    this.emitDispatchUpdated({
+      dispatch,
+      report: dispatch.report,
+      officer: dispatch.officer,
+      ambulance: dispatch.ambulance || null,
+      extra: {
+        reason: "DISPATCH_REJECTED",
+      },
     });
 
     return await this.reassignNextNearestOfficer(dispatch.report.id);
@@ -678,6 +691,7 @@ class DispatchService {
             "phoneNumber",
             "email",
             "role",
+            "roleId",
             "status",
             "isActive",
           ],
@@ -768,7 +782,14 @@ class DispatchService {
         {
           model: Officer,
           as: "officer",
-          attributes: ["id", "fullName", "phoneNumber", "role", "status"],
+          attributes: [
+            "id",
+            "fullName",
+            "phoneNumber",
+            "role",
+            "roleId",
+            "status",
+          ],
           required: false,
         },
         {
@@ -787,6 +808,7 @@ class DispatchService {
       order: [["assignedAt", "DESC"]],
       limit,
       offset,
+      distinct: true,
     });
 
     return {
@@ -855,7 +877,14 @@ class DispatchService {
         {
           model: Officer,
           as: "officer",
-          attributes: ["id", "fullName", "phoneNumber", "role", "status"],
+          attributes: [
+            "id",
+            "fullName",
+            "phoneNumber",
+            "role",
+            "roleId",
+            "status",
+          ],
           required: false,
         },
         {
@@ -901,7 +930,17 @@ class DispatchService {
 
     const dispatch = await Dispatch.findByPk(dispatchId, {
       include: [
-        { model: EmergencyReport, as: "report" },
+        {
+          model: EmergencyReport,
+          as: "report",
+          include: [
+            {
+              model: Service,
+              as: "service",
+              required: false,
+            },
+          ],
+        },
         { model: Officer, as: "officer", required: false },
         { model: Ambulance, as: "ambulance", required: false },
       ],
@@ -1000,38 +1039,11 @@ class DispatchService {
       }
     }
 
-    emitToUser(dispatch.report.userId, "report:status_updated", {
-      reportId: dispatch.report.id,
-      dispatchId: dispatch.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus,
-      reportStatus,
-    });
-
-    if (dispatch.officerId) {
-      emitToOfficer(dispatch.officerId, "dispatch:status_updated", {
-        dispatchId: dispatch.id,
-        reportId: dispatch.report.id,
-        serviceId: dispatch.serviceId,
-        dispatchStatus,
-        reportStatus,
-      });
-    }
-
-    emitToAdminRoom("dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus,
-      reportStatus,
-    });
-
-    emitToReportRoom(dispatch.report.id, "report:status_updated", {
-      reportId: dispatch.report.id,
-      dispatchId: dispatch.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus,
-      reportStatus,
+    this.emitDispatchUpdated({
+      dispatch,
+      report: dispatch.report,
+      officer: dispatch.officer,
+      ambulance: dispatch.ambulance,
     });
 
     return await this.getDispatchById(dispatch.id);
@@ -1040,7 +1052,17 @@ class DispatchService {
   static async getOfficerOwnedDispatch(officerId, dispatchId) {
     const dispatch = await Dispatch.findByPk(dispatchId, {
       include: [
-        { model: EmergencyReport, as: "report" },
+        {
+          model: EmergencyReport,
+          as: "report",
+          include: [
+            {
+              model: Service,
+              as: "service",
+              required: false,
+            },
+          ],
+        },
         { model: Officer, as: "officer", required: false },
         { model: Ambulance, as: "ambulance", required: false },
       ],
@@ -1089,28 +1111,11 @@ class DispatchService {
       updatedById: authUser.id,
     });
 
-    emitToUser(dispatch.report.userId, "dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ACCEPTED",
-      reportStatus: "ACCEPTED",
-    });
-
-    emitToAdminRoom("dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ACCEPTED",
-      reportStatus: "ACCEPTED",
-    });
-
-    emitToReportRoom(dispatch.report.id, "dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ACCEPTED",
-      reportStatus: "ACCEPTED",
+    this.emitDispatchUpdated({
+      dispatch,
+      report: dispatch.report,
+      officer: dispatch.officer,
+      ambulance: dispatch.ambulance,
     });
 
     return await this.getDispatchById(dispatch.id);
@@ -1160,28 +1165,11 @@ class DispatchService {
       updatedById: authUser.id,
     });
 
-    emitToUser(dispatch.report.userId, "dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ON_THE_WAY",
-      reportStatus: "ON_THE_WAY",
-    });
-
-    emitToAdminRoom("dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ON_THE_WAY",
-      reportStatus: "ON_THE_WAY",
-    });
-
-    emitToReportRoom(dispatch.report.id, "dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ON_THE_WAY",
-      reportStatus: "ON_THE_WAY",
+    this.emitDispatchUpdated({
+      dispatch,
+      report: dispatch.report,
+      officer: dispatch.officer,
+      ambulance: dispatch.ambulance,
     });
 
     return await this.getDispatchById(dispatch.id);
@@ -1219,28 +1207,11 @@ class DispatchService {
       updatedById: authUser.id,
     });
 
-    emitToUser(dispatch.report.userId, "dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ARRIVED",
-      reportStatus: "ARRIVED",
-    });
-
-    emitToAdminRoom("dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ARRIVED",
-      reportStatus: "ARRIVED",
-    });
-
-    emitToReportRoom(dispatch.report.id, "dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "ARRIVED",
-      reportStatus: "ARRIVED",
+    this.emitDispatchUpdated({
+      dispatch,
+      report: dispatch.report,
+      officer: dispatch.officer,
+      ambulance: dispatch.ambulance,
     });
 
     return await this.getDispatchById(dispatch.id);
@@ -1296,28 +1267,11 @@ class DispatchService {
       });
     }
 
-    emitToUser(dispatch.report.userId, "dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "COMPLETED",
-      reportStatus: "COMPLETED",
-    });
-
-    emitToAdminRoom("dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "COMPLETED",
-      reportStatus: "COMPLETED",
-    });
-
-    emitToReportRoom(dispatch.report.id, "dispatch:status_updated", {
-      dispatchId: dispatch.id,
-      reportId: dispatch.report.id,
-      serviceId: dispatch.serviceId,
-      dispatchStatus: "COMPLETED",
-      reportStatus: "COMPLETED",
+    this.emitDispatchUpdated({
+      dispatch,
+      report: dispatch.report,
+      officer: dispatch.officer,
+      ambulance: dispatch.ambulance,
     });
 
     return await this.getDispatchById(dispatch.id);

@@ -6,8 +6,9 @@ let io = null;
 const initSocket = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: ["http://localhost:3000", "http://localhost:5173"],
       methods: ["GET", "POST", "PATCH"],
+      credentials: true,
     },
   });
 
@@ -18,9 +19,8 @@ const initSocket = (httpServer) => {
 
 const getIO = () => {
   if (!io) {
-    throw new Error("Socket.io has not been initialized");
+    throw new Error("Socket not initialized");
   }
-
   return io;
 };
 

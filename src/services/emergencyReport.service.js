@@ -94,22 +94,19 @@ class EmergencyReportService {
       updatedById: authUser.id,
     });
 
-    emitToAdminRoom("report:new", {
-      reportId: report.id,
+    emitToAdminRoom("report:created", {
+      id: report.id,
       reportCode: report.reportCode,
-      serviceId: service.id,
-      serviceCode: service.serviceCode,
-      serviceName: service.serviceName,
+      latitude: report.latitude,
+      longitude: report.longitude,
       status: report.status,
-      userId: authUser.id,
+      serviceId: service.id,
+      serviceName: service.serviceName,
     });
 
     emitToUser(authUser.id, "report:created", {
-      reportId: report.id,
+      id: report.id,
       reportCode: report.reportCode,
-      serviceId: service.id,
-      serviceCode: service.serviceCode,
-      serviceName: service.serviceName,
       status: report.status,
     });
 
@@ -423,6 +420,24 @@ class EmergencyReportService {
       notes: notes || `Report status updated to ${status}`,
       updatedByType: "ADMIN",
       updatedById: authUser.id,
+    });
+
+    emitToAdminRoom("report:updated", {
+      reportId: report.id,
+      status: report.status,
+      updatedAt: new Date(),
+    });
+
+    emitToUser(report.userId, "report:updated", {
+      reportId: report.id,
+      status: report.status,
+      updatedAt: new Date(),
+    });
+
+    emitToReportRoom(report.id, "report:updated", {
+      reportId: report.id,
+      status: report.status,
+      updatedAt: new Date(),
     });
 
     return report;
