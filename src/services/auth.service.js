@@ -673,6 +673,132 @@ class AuthService {
 
     return [...new Set([raw, normalized])];
   }
+
+  static async loginMobile(payload) {
+    const { identifier, password } = payload;
+
+    const raw = identifier.toString().trim();
+    const normalizedPhone = this.normalizePhoneNumber(raw);
+    const phoneVariants = this.getPhoneVariants(raw);
+
+    // ======================
+    // 1. Cek USER
+    // ======================
+    const user = await User.findOne({
+      where: {
+        [Op.or]: [
+          { phoneNumber: { [Op.in]: phoneVariants } },
+          { phoneNumber: normalizedPhone },
+          { email: raw.toLowerCase() }, // kalau nanti user punya email
+        ],
+      },
+    });
+
+    if (user) {
+      const isValidPassword = await comparePassword(
+        password,
+        user.passwordHash,
+      );
+
+      if (!isValidPassword) {
+        throw new AppError("Invalid password", 401);
+      }
+
+      const tokenPayload = {
+        id: user.id,
+        role: "USER",
+        type: "USER",
+      };
+
+      const accessToken = generateAccessToken(tokenPayload);
+      const refreshToken = generateRefreshToken(tokenPayload);
+
+      await this.saveRefreshToken({
+        ownerType: "USER",
+        ownerId: user.id,
+        token: refreshToken,
+      });
+
+      return {
+        account: {
+          id: user.id,
+          fullName: user.fullName,
+          phoneNumber: user.phoneNumber,
+          email: user.email || null,
+          role: "USER",
+          type: "USER",
+        },
+        accessToken,
+        refreshToken,
+      };
+    }
+
+    // ======================
+    // 2. Cek OFFICER
+    // ======================
+    const officer = await Officer.findOne({
+      where: {
+        [Op.or]: [
+          { email: raw.toLowerCase() },
+          { phoneNumber: { [Op.in]: phoneVariants } },
+        ],
+      },
+    });
+
+    if (!officer) {
+      throw new AppError("Account not found", 404);
+    }
+
+    if (!officer.isActive) {
+      throw new AppError("Account is inactive", 403);
+    }
+
+    if (!officer.passwordHash) {
+      throw new AppError("Password is not set", 400);
+    }
+
+    const isValidPassword = await comparePassword(
+      password,
+      officer.passwordHash,
+    );
+
+    if (!isValidPassword) {
+      throw new AppError("Invalid password", 401);
+    }
+
+    await officer.update({
+      lastLoginAt: new Date(),
+    });
+
+    const tokenPayload = {
+      id: officer.id,
+      role: officer.role,
+      type: "OFFICER",
+    };
+
+    const accessToken = generateAccessToken(tokenPayload);
+    const refreshToken = generateRefreshToken(tokenPayload);
+
+    await this.saveRefreshToken({
+      ownerType: "OFFICER",
+      ownerId: officer.id,
+      token: refreshToken,
+    });
+
+    return {
+      account: {
+        id: officer.id,
+        fullName: officer.fullName,
+        email: officer.email,
+        phoneNumber: officer.phoneNumber,
+        role: officer.role,
+        status: officer.status,
+        type: "OFFICER",
+      },
+      accessToken,
+      refreshToken,
+    };
+  }
 }
 
 module.exports = AuthService;

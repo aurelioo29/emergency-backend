@@ -55,6 +55,19 @@ class AuthController {
     }
   }
 
+  static async loginMobile(req, res, next) {
+    try {
+      const result = await AuthService.loginMobile(req.body);
+
+      return sendSuccess(res, {
+        message: "Mobile login success",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async refresh(req, res, next) {
     try {
       const result = await AuthService.refreshToken(req.body);

@@ -25,6 +25,11 @@ const User = sequelize.define(
       unique: true,
       field: "phone_number",
     },
+    email: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      unique: true,
+    },
     address: {
       type: DataTypes.TEXT,
       allowNull: false,

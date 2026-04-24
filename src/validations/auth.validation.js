@@ -98,9 +98,19 @@ const resetForgotPasswordValidation = [
     .withMessage("Confirm password must be at least 6 characters"),
 ];
 
+const mobileLoginValidation = [
+  body("identifier")
+    .trim()
+    .notEmpty()
+    .withMessage("Phone number or email is required"),
+
+  body("password").notEmpty().withMessage("Password is required"),
+];
+
 module.exports = {
   registerValidation,
   loginUserValidation,
+  mobileLoginValidation,
   loginAdminValidation,
   loginOfficerValidation,
   refreshTokenValidation,

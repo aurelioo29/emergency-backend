@@ -14,6 +14,7 @@ const {
   requestForgotPasswordOtpValidation,
   verifyForgotPasswordOtpValidation,
   resetForgotPasswordValidation,
+  mobileLoginValidation,
 } = require("../validations/auth.validation");
 
 router.post("/register", registerValidation, validate, AuthController.register);
@@ -70,6 +71,13 @@ router.post(
   resetForgotPasswordValidation,
   validate,
   AuthController.resetForgotPassword,
+);
+
+router.post(
+  "/mobile/login",
+  mobileLoginValidation,
+  validate,
+  AuthController.loginMobile,
 );
 
 module.exports = router;
