@@ -4,7 +4,11 @@ const { sendSuccess } = require("../utils/response");
 class ServiceController {
   static async create(req, res, next) {
     try {
-      const result = await ServiceService.createService(req.user, req.body);
+      const result = await ServiceService.createService(
+        req.user,
+        req.body,
+        req.file,
+      );
 
       return sendSuccess(res, {
         statusCode: 201,
@@ -62,6 +66,7 @@ class ServiceController {
         req.user,
         req.params.id,
         req.body,
+        req.file,
       );
 
       return sendSuccess(res, {

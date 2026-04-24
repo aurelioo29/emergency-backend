@@ -2,41 +2,56 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-const uploadDir = path.join(__dirname, "../../uploads/emergency-reports");
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 }
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname);
-    const safeName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-    cb(null, safeName);
-  },
-});
+function createImageUploader(folderName, maxSizeMb = 5) {
+  const uploadDir = path.join(__dirname, `../../uploads/${folderName}`);
 
-const fileFilter = (req, file, cb) => {
-  const allowedMimeTypes = ["image/jpeg", "image/png", "image/webp"];
+  ensureDir(uploadDir);
 
-  if (!allowedMimeTypes.includes(file.mimetype)) {
-    return cb(new Error("Only JPG, PNG, and WEBP images are allowed"));
-  }
+  const storage = multer.diskStorage({
+    destination(req, file, cb) {
+      cb(null, uploadDir);
+    },
+    filename(req, file, cb) {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const safeName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+      cb(null, safeName);
+    },
+  });
 
-  cb(null, true);
-};
+  const fileFilter = (req, file, cb) => {
+    const allowedMimeTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/svg+xml",
+    ];
 
-const uploadEmergencyPhoto = multer({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-  },
-});
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      return cb(new Error("Only JPG, PNG, WEBP, and SVG images are allowed"));
+    }
+
+    cb(null, true);
+  };
+
+  return multer({
+    storage,
+    fileFilter,
+    limits: {
+      fileSize: maxSizeMb * 1024 * 1024,
+    },
+  });
+}
+
+const uploadEmergencyPhoto = createImageUploader("emergency-reports", 5);
+const uploadServiceIcon = createImageUploader("services", 2);
 
 module.exports = {
   uploadEmergencyPhoto,
+  uploadServiceIcon,
 };
