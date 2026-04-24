@@ -29,6 +29,11 @@ const Service = sequelize.define(
       allowNull: true,
       field: "icon_name",
     },
+    iconUrl: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: "icon_url",
+    },
     colorHex: {
       type: DataTypes.STRING(20),
       allowNull: true,
