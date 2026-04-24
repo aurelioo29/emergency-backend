@@ -3,7 +3,19 @@ const { Service } = require("../models");
 const AppError = require("../utils/AppError");
 
 class ServiceService {
-  static async createService(authUser, payload) {
+  static normalizeBoolean(value, defaultValue = false) {
+    if (value === undefined || value === null || value === "")
+      return defaultValue;
+    if (typeof value === "boolean") return value;
+    return value === "true";
+  }
+
+  static getIconUrl(file) {
+    if (!file) return null;
+    return `/uploads/services/${file.filename}`;
+  }
+
+  static async createService(authUser, payload, iconFile) {
     if (authUser.type !== "ADMIN") {
       throw new AppError("Only admin can create service", 403);
     }
@@ -18,22 +30,22 @@ class ServiceService {
       throw new AppError("Service code already exists", 409);
     }
 
+    const iconUrl = this.getIconUrl(iconFile);
+
     const service = await Service.create({
       serviceCode: payload.serviceCode.toUpperCase(),
       serviceName: payload.serviceName,
       description: payload.description || null,
       iconName: payload.iconName || null,
+      iconUrl,
       colorHex: payload.colorHex || null,
-      requiresDispatch:
-        typeof payload.requiresDispatch === "boolean"
-          ? payload.requiresDispatch
-          : true,
+      requiresDispatch: this.normalizeBoolean(payload.requiresDispatch, true),
       autoAcceptMode: payload.autoAcceptMode || "CONFIRM",
       acceptTimeoutSeconds:
         payload.acceptTimeoutSeconds !== undefined
           ? Number(payload.acceptTimeoutSeconds)
           : 15,
-      isActive: typeof payload.isActive === "boolean" ? payload.isActive : true,
+      isActive: this.normalizeBoolean(payload.isActive, true),
     });
 
     return service;
@@ -77,14 +89,10 @@ class ServiceService {
   }
 
   static async getActiveServices() {
-    const services = await Service.findAll({
-      where: {
-        isActive: true,
-      },
+    return await Service.findAll({
+      where: { isActive: true },
       order: [["serviceName", "ASC"]],
     });
-
-    return services;
   }
 
   static async getServiceById(id) {
@@ -97,7 +105,7 @@ class ServiceService {
     return service;
   }
 
-  static async updateService(authUser, id, payload) {
+  static async updateService(authUser, id, payload, iconFile) {
     if (authUser.type !== "ADMIN") {
       throw new AppError("Only admin can update service", 403);
     }
@@ -121,6 +129,8 @@ class ServiceService {
       }
     }
 
+    const nextIconUrl = iconFile ? this.getIconUrl(iconFile) : service.iconUrl;
+
     await service.update({
       serviceCode: payload.serviceCode
         ? payload.serviceCode.toUpperCase()
@@ -132,11 +142,15 @@ class ServiceService {
           : service.description,
       iconName:
         payload.iconName !== undefined ? payload.iconName : service.iconName,
+      iconUrl: nextIconUrl,
       colorHex:
         payload.colorHex !== undefined ? payload.colorHex : service.colorHex,
       requiresDispatch:
         payload.requiresDispatch !== undefined
-          ? payload.requiresDispatch
+          ? this.normalizeBoolean(
+              payload.requiresDispatch,
+              service.requiresDispatch,
+            )
           : service.requiresDispatch,
       autoAcceptMode: payload.autoAcceptMode ?? service.autoAcceptMode,
       acceptTimeoutSeconds:
@@ -144,7 +158,9 @@ class ServiceService {
           ? Number(payload.acceptTimeoutSeconds)
           : service.acceptTimeoutSeconds,
       isActive:
-        payload.isActive !== undefined ? payload.isActive : service.isActive,
+        payload.isActive !== undefined
+          ? this.normalizeBoolean(payload.isActive, service.isActive)
+          : service.isActive,
     });
 
     return service;
@@ -162,7 +178,7 @@ class ServiceService {
     }
 
     await service.update({
-      isActive,
+      isActive: this.normalizeBoolean(isActive, service.isActive),
     });
 
     return service;
