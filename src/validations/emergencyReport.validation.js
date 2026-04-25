@@ -57,6 +57,17 @@ const emergencyReportIdParamValidation = [
   param("id").isUUID().withMessage("Emergency report id must be a valid UUID"),
 ];
 
+const cancelEmergencyReportValidation = [
+  param("id").isUUID().withMessage("Emergency report id must be a valid UUID"),
+
+  body("notes")
+    .optional({ nullable: true })
+    .isString()
+    .withMessage("Notes must be a string")
+    .isLength({ max: 1000 })
+    .withMessage("Notes must not exceed 1000 characters"),
+];
+
 const myReportsQueryValidation = [
   query("page")
     .optional()
@@ -141,4 +152,5 @@ module.exports = {
   myReportsQueryValidation,
   allReportsQueryValidation,
   updateEmergencyReportStatusValidation,
+  cancelEmergencyReportValidation,
 };

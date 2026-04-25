@@ -10,6 +10,7 @@ const {
   myReportsQueryValidation,
   allReportsQueryValidation,
   updateEmergencyReportStatusValidation,
+  cancelEmergencyReportValidation,
 } = require("../validations/emergencyReport.validation");
 const { uploadEmergencyPhoto } = require("../middlewares/upload.middleware");
 
@@ -22,6 +23,13 @@ router.post(
   createEmergencyReportValidation,
   validate,
   EmergencyReportController.create,
+);
+
+router.patch(
+  "/:id/cancel",
+  cancelEmergencyReportValidation,
+  validate,
+  EmergencyReportController.cancelReport,
 );
 
 router.get(

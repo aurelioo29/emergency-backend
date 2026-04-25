@@ -86,6 +86,23 @@ class EmergencyReportController {
       next(error);
     }
   }
+
+  static async cancelReport(req, res, next) {
+    try {
+      const result = await EmergencyReportService.cancelReport(
+        req.user,
+        req.params.id,
+        req.body,
+      );
+
+      return sendSuccess(res, {
+        message: "Emergency report cancelled successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = EmergencyReportController;

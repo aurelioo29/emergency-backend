@@ -11,7 +11,12 @@ const {
 } = require("../models");
 const AppError = require("../utils/AppError");
 const { Op } = require("sequelize");
-const { emitToAdminRoom, emitToUser } = require("../socket/emitter");
+const {
+  emitToAdminRoom,
+  emitToUser,
+  emitToOfficer,
+  emitToReportRoom,
+} = require("../socket/emitter");
 const DispatchService = require("./dispatch.service");
 
 class EmergencyReportService {
@@ -441,6 +446,129 @@ class EmergencyReportService {
     });
 
     return report;
+  }
+
+  static async cancelReport(authUser, reportId, payload = {}) {
+    if (authUser.type !== "USER") {
+      throw new AppError("Only user can cancel own emergency report", 403);
+    }
+
+    const report = await EmergencyReport.findByPk(reportId, {
+      include: [
+        {
+          model: Dispatch,
+          as: "dispatches",
+          required: false,
+          include: [
+            {
+              model: Officer,
+              as: "officer",
+              required: false,
+            },
+            {
+              model: Ambulance,
+              as: "ambulance",
+              required: false,
+            },
+          ],
+        },
+        {
+          model: Service,
+          as: "service",
+          required: false,
+        },
+      ],
+    });
+
+    if (!report) {
+      throw new AppError("Emergency report not found", 404);
+    }
+
+    if (report.userId !== authUser.id) {
+      throw new AppError("You can only cancel your own report", 403);
+    }
+
+    const allowedCancelStatuses = ["REPORTED", "ASSIGNED"];
+
+    if (!allowedCancelStatuses.includes(report.status)) {
+      throw new AppError(
+        `Report with status ${report.status} cannot be cancelled`,
+        400,
+      );
+    }
+
+    const now = new Date();
+    const notes = payload.notes || "Emergency report cancelled by user";
+
+    await report.update({
+      status: "CANCELLED",
+      cancelledAt: now,
+    });
+
+    const activeDispatches = (report.dispatches || []).filter((dispatch) => {
+      return !["COMPLETED", "CANCELLED", "REJECTED", "EXPIRED"].includes(
+        dispatch.dispatchStatus,
+      );
+    });
+
+    for (const dispatch of activeDispatches) {
+      await dispatch.update({
+        dispatchStatus: "CANCELLED",
+        cancelledAt: now,
+        notes,
+      });
+
+      if (dispatch.officer) {
+        await dispatch.officer.update({
+          status: "AVAILABLE",
+        });
+      }
+
+      emitToAdminRoom("dispatch:updated", {
+        id: dispatch.id,
+        reportId: report.id,
+        dispatchStatus: "CANCELLED",
+        reason: "REPORT_CANCELLED_BY_USER",
+      });
+
+      if (dispatch.officerId) {
+        emitToOfficer(dispatch.officerId, "dispatch:updated", {
+          id: dispatch.id,
+          reportId: report.id,
+          dispatchStatus: "CANCELLED",
+          reason: "REPORT_CANCELLED_BY_USER",
+        });
+      }
+
+      emitToReportRoom(report.id, "dispatch:updated", {
+        id: dispatch.id,
+        reportId: report.id,
+        dispatchStatus: "CANCELLED",
+        reason: "REPORT_CANCELLED_BY_USER",
+      });
+    }
+
+    await ReportTrackingLog.create({
+      reportId: report.id,
+      status: "CANCELLED",
+      notes,
+      updatedByType: "USER",
+      updatedById: authUser.id,
+    });
+
+    const payloadSocket = {
+      reportId: report.id,
+      id: report.id,
+      reportCode: report.reportCode,
+      status: "CANCELLED",
+      reason: "REPORT_CANCELLED_BY_USER",
+    };
+
+    emitToAdminRoom("report:updated", payloadSocket);
+    emitToUser(authUser.id, "report:updated", payloadSocket);
+    emitToReportRoom(report.id, "report:updated", payloadSocket);
+
+    return await this.getReportDetail(authUser, report.id);
   }
 }
 
