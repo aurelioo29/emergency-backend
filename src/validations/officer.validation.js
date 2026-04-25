@@ -115,9 +115,18 @@ const officerListQueryValidation = [
     .withMessage("isActive must be a boolean"),
 ];
 
+const updateMyOfficerStatusValidation = [
+  body("status")
+    .notEmpty()
+    .withMessage("Status is required")
+    .isIn(["AVAILABLE", "OFFLINE"])
+    .withMessage("Status must be AVAILABLE or OFFLINE"),
+];
+
 module.exports = {
   createOfficerValidation,
   updateOfficerValidation,
   officerIdParamValidation,
   officerListQueryValidation,
+  updateMyOfficerStatusValidation,
 };

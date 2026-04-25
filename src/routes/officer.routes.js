@@ -10,6 +10,7 @@ const {
   updateOfficerValidation,
   officerIdParamValidation,
   officerListQueryValidation,
+  updateMyOfficerStatusValidation,
 } = require("../validations/officer.validation");
 
 router.use(authMiddleware, adminMiddleware);
@@ -33,6 +34,13 @@ router.patch(
   officerIdParamValidation,
   validate,
   OfficerController.deactivate,
+);
+
+router.patch(
+  "/me/status",
+  updateMyOfficerStatusValidation,
+  validate,
+  OfficerController.updateMyStatus,
 );
 
 module.exports = router;

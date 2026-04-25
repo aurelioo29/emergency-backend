@@ -45,7 +45,10 @@ class OfficerController {
 
   static async update(req, res, next) {
     try {
-      const result = await OfficerServiceService.update(req.params.id, req.body);
+      const result = await OfficerServiceService.update(
+        req.params.id,
+        req.body,
+      );
 
       return sendSuccess(res, {
         message: "Officer updated successfully",
@@ -62,6 +65,22 @@ class OfficerController {
 
       return sendSuccess(res, {
         message: "Officer deactivated successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async updateMyStatus(req, res, next) {
+    try {
+      const result = await OfficerServiceService.updateMyStatus(
+        req.user,
+        req.body.status,
+      );
+
+      return sendSuccess(res, {
+        message: "Officer status updated successfully",
         data: result,
       });
     } catch (error) {

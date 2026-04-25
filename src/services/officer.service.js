@@ -288,6 +288,41 @@ class OfficerServiceService {
       ],
     });
   }
+
+  static async updateMyStatus(authUser, status) {
+    if (authUser.type !== "OFFICER") {
+      throw new AppError("Only officer can update own status", 403);
+    }
+
+    const officer = await Officer.findByPk(authUser.id, {
+      attributes: { exclude: ["passwordHash"] },
+    });
+
+    if (!officer) {
+      throw new AppError("Officer not found", 404);
+    }
+
+    if (!officer.isActive) {
+      throw new AppError("Officer account is inactive", 403);
+    }
+
+    const activeStatuses = ["ON_DUTY", "BUSY"];
+
+    if (activeStatuses.includes(officer.status)) {
+      throw new AppError(
+        "Officer cannot go offline while handling active dispatch",
+        400,
+      );
+    }
+
+    await officer.update({
+      status,
+    });
+
+    return await Officer.findByPk(authUser.id, {
+      attributes: { exclude: ["passwordHash"] },
+    });
+  }
 }
 
 module.exports = OfficerServiceService;
