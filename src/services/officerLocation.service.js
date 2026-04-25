@@ -55,7 +55,15 @@ class OfficerLocationService {
       throw new AppError("Invalid reportId for this officer", 400);
     }
 
-    const finalReportId = activeDispatch ? activeDispatch.reportId : null;
+    if (finalReportId) {
+      emitToOfficer(authUser.id, "officer:location_updated", {
+        reportId: finalReportId,
+        officerId: authUser.id,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        recordedAt: location.recordedAt,
+      });
+    }
 
     const location = await OfficerLocation.create({
       officerId: authUser.id,

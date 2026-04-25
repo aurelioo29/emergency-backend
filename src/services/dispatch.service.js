@@ -1229,7 +1229,7 @@ class DispatchService {
       dispatchId,
     );
 
-    if (!["ARRIVED", "ON_THE_WAY"].includes(dispatch.dispatchStatus)) {
+    if (dispatch.dispatchStatus !== "ARRIVED") {
       throw new AppError(
         "Only ARRIVED or ON_THE_WAY dispatch can be completed",
         400,
