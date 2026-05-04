@@ -13,22 +13,32 @@ const app = express();
 const uploadsPath = path.resolve(process.cwd(), "uploads");
 console.log("Serving uploads from:", uploadsPath);
 
+const normalizeOrigin = (origin) => {
+  if (!origin) return "";
+  return origin.replace(/\/$/, "");
+};
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:7001",
-  "http://147.93.81.243:7000/",
-  "http://147.93.81.243:7001/",
+  "http://147.93.81.243:7001",
   "https://alerta.project-mahadatatech.web.id",
   process.env.FRONTEND_URL,
-].filter(Boolean);
+  process.env.FRONTEND_DOMAIN,
+]
+  .filter(Boolean)
+  .map(normalizeOrigin);
 
 const corsOptions = {
   origin(origin, callback) {
+    // Allow server-to-server, Postman, mobile apps, curl, etc.
     if (!origin) {
       return callback(null, true);
     }
 
-    if (allowedOrigins.includes(origin)) {
+    const normalizedOrigin = normalizeOrigin(origin);
+
+    if (allowedOrigins.includes(normalizedOrigin)) {
       return callback(null, true);
     }
 
