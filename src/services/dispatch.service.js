@@ -239,16 +239,34 @@ class DispatchService {
         throw new AppError("Offline officer cannot accept report", 400);
       }
 
-      if (officer.status === "ON_DUTY") {
-        throw new AppError("Officer is already on duty", 400);
+      /**
+       * Jangan hanya mengandalkan officer.status === "ON_DUTY".
+       * Kita cek dispatch aktif langsung, karena ini sumber kebenaran.
+       */
+      const activeOfficerDispatch = await Dispatch.findOne({
+        where: {
+          officerId: authUser.id,
+          dispatchStatus: {
+            [Op.in]: [
+              "ASSIGNED",
+              "ACCEPTED",
+              "ON_THE_WAY",
+              "ARRIVED",
+              "HANDLING",
+            ],
+          },
+        },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (activeOfficerDispatch) {
+        throw new AppError(
+          "You still have an active dispatch. Complete it before accepting a new report.",
+          409,
+        );
       }
 
-      /**
-       * IMPORTANT:
-       * Jangan include Service di query yang pakai FOR UPDATE.
-       * PostgreSQL tidak suka FOR UPDATE + LEFT OUTER JOIN nullable.
-       * Dia bukan picky, dia cuma PostgreSQL. Ya, sama aja sih.
-       */
       const report = await EmergencyReport.findOne({
         where: {
           id: reportId,
