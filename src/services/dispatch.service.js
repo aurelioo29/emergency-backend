@@ -243,17 +243,16 @@ class DispatchService {
         throw new AppError("Officer is already on duty", 400);
       }
 
+      /**
+       * IMPORTANT:
+       * Jangan include Service di query yang pakai FOR UPDATE.
+       * PostgreSQL tidak suka FOR UPDATE + LEFT OUTER JOIN nullable.
+       * Dia bukan picky, dia cuma PostgreSQL. Ya, sama aja sih.
+       */
       const report = await EmergencyReport.findOne({
         where: {
           id: reportId,
         },
-        include: [
-          {
-            model: Service,
-            as: "service",
-            required: false,
-          },
-        ],
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
@@ -268,6 +267,18 @@ class DispatchService {
 
       if (!report.serviceId) {
         throw new AppError("Report does not have serviceId", 400);
+      }
+
+      const service = await Service.findOne({
+        where: {
+          id: report.serviceId,
+          isActive: true,
+        },
+        transaction,
+      });
+
+      if (!service) {
+        throw new AppError("Service not found or inactive", 404);
       }
 
       const officerService = await OfficerService.findOne({
@@ -362,7 +373,11 @@ class DispatchService {
 
     emitToAdminRoom("dispatch:accepted", payload);
     emitToOfficer(authUser.id, "dispatch:accepted", payload);
-    emitToOfficerRoom("report:taken", payload);
+
+    if (typeof emitToOfficerRoom === "function") {
+      emitToOfficerRoom("report:taken", payload);
+    }
+
     emitToUser(acceptedReport.userId, "report:updated", payload);
     emitToReportRoom(acceptedReport.id, "report:updated", payload);
 
