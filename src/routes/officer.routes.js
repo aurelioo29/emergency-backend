@@ -35,7 +35,7 @@ router.patch(
 router.get("/me/reports/available", DispatchController.getAvailableReports);
 
 router.patch(
-  "/me/reports/:reportId/accept",
+  "/me/reports/:id/accept",
   emergencyReportIdParamValidation,
   validate,
   DispatchController.acceptAvailableReport,

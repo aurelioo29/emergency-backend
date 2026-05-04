@@ -169,7 +169,7 @@ class DispatchController {
     try {
       const result = await DispatchService.acceptAvailableReport(
         req.user,
-        req.params.reportId,
+        req.params.id,
       );
 
       return sendSuccess(res, {
