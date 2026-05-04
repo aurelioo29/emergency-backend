@@ -1,4 +1,5 @@
 const { Op } = require("sequelize");
+const sequelize = require("../config/database");
 const {
   Dispatch,
   EmergencyReport,
@@ -17,6 +18,7 @@ const {
   emitToAdminRoom,
   emitToUser,
   emitToOfficer,
+  emitToOfficerRoom,
   emitToReportRoom,
 } = require("../socket/emitter");
 const { calculateDistanceKm } = require("../utils/distance");
@@ -101,6 +103,270 @@ class DispatchService {
     if (report?.id) {
       emitToReportRoom(report.id, "dispatch:failed", payload);
     }
+  }
+
+  static async getAvailableReportsForOfficer(authUser, query = {}) {
+    if (authUser.type !== "OFFICER") {
+      throw new AppError("Only officer can access available reports", 403);
+    }
+
+    const page = Number(query.page) > 0 ? Number(query.page) : 1;
+    const limit = Number(query.limit) > 0 ? Number(query.limit) : 10;
+    const offset = (page - 1) * limit;
+
+    const officer = await Officer.findOne({
+      where: {
+        id: authUser.id,
+        isActive: true,
+      },
+    });
+
+    if (!officer) {
+      throw new AppError("Officer not found or inactive", 404);
+    }
+
+    if (officer.status === "OFFLINE") {
+      throw new AppError("Offline officer cannot view available reports", 400);
+    }
+
+    const officerServices = await OfficerService.findAll({
+      where: {
+        officerId: authUser.id,
+      },
+      attributes: ["serviceId"],
+    });
+
+    const serviceIds = officerServices.map((item) => item.serviceId);
+
+    if (!serviceIds.length) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          totalItems: 0,
+          totalPages: 0,
+        },
+      };
+    }
+
+    const where = {
+      status: "REPORTED",
+      serviceId: {
+        [Op.in]: serviceIds,
+      },
+    };
+
+    if (query.serviceId) {
+      if (!serviceIds.includes(query.serviceId)) {
+        throw new AppError("You are not assigned to this service", 403);
+      }
+
+      where.serviceId = query.serviceId;
+    }
+
+    if (query.search) {
+      where[Op.or] = [
+        { reportCode: { [Op.iLike]: `%${query.search}%` } },
+        { description: { [Op.iLike]: `%${query.search}%` } },
+        { addressSnapshot: { [Op.iLike]: `%${query.search}%` } },
+      ];
+    }
+
+    const { count, rows } = await EmergencyReport.findAndCountAll({
+      where,
+      include: [
+        {
+          model: Service,
+          as: "service",
+          attributes: [
+            "id",
+            "serviceCode",
+            "serviceName",
+            "iconName",
+            "colorHex",
+          ],
+          required: false,
+        },
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "fullName", "phoneNumber"],
+          required: false,
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit,
+      offset,
+      distinct: true,
+    });
+
+    return {
+      items: rows,
+      pagination: {
+        page,
+        limit,
+        totalItems: count,
+        totalPages: Math.ceil(count / limit),
+      },
+    };
+  }
+
+  static async acceptAvailableReport(authUser, reportId) {
+    if (authUser.type !== "OFFICER") {
+      throw new AppError("Only officer can accept report", 403);
+    }
+
+    let createdDispatch = null;
+    let acceptedReport = null;
+    let officer = null;
+
+    await sequelize.transaction(async (transaction) => {
+      officer = await Officer.findOne({
+        where: {
+          id: authUser.id,
+          isActive: true,
+        },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (!officer) {
+        throw new AppError("Officer not found or inactive", 404);
+      }
+
+      if (officer.status === "OFFLINE") {
+        throw new AppError("Offline officer cannot accept report", 400);
+      }
+
+      if (officer.status === "ON_DUTY") {
+        throw new AppError("Officer is already on duty", 400);
+      }
+
+      const report = await EmergencyReport.findOne({
+        where: {
+          id: reportId,
+        },
+        include: [
+          {
+            model: Service,
+            as: "service",
+            required: false,
+          },
+        ],
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (!report) {
+        throw new AppError("Emergency report not found", 404);
+      }
+
+      if (report.status !== "REPORTED") {
+        throw new AppError("Report already accepted or not available", 409);
+      }
+
+      if (!report.serviceId) {
+        throw new AppError("Report does not have serviceId", 400);
+      }
+
+      const officerService = await OfficerService.findOne({
+        where: {
+          officerId: authUser.id,
+          serviceId: report.serviceId,
+        },
+        transaction,
+      });
+
+      if (!officerService) {
+        throw new AppError("You are not assigned to this report service", 403);
+      }
+
+      const existingActiveDispatch = await Dispatch.findOne({
+        where: {
+          reportId,
+          dispatchStatus: {
+            [Op.notIn]: ["COMPLETED", "CANCELLED", "REJECTED", "EXPIRED"],
+          },
+        },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (existingActiveDispatch) {
+        throw new AppError("Report already accepted by another officer", 409);
+      }
+
+      createdDispatch = await Dispatch.create(
+        {
+          reportId: report.id,
+          serviceId: report.serviceId,
+          officerId: authUser.id,
+          ambulanceId: null,
+          assignedBy: null,
+          assignedAt: new Date(),
+          acceptedAt: new Date(),
+          dispatchStatus: "ACCEPTED",
+          autoAssigned: false,
+          assignmentOrder: 1,
+          expiresAt: null,
+          notes: "Report manually accepted by officer",
+        },
+        { transaction },
+      );
+
+      await report.update(
+        {
+          status: "ACCEPTED",
+          assignedAt: new Date(),
+          acceptedAt: new Date(),
+          failedAt: null,
+        },
+        { transaction },
+      );
+
+      await officer.update(
+        {
+          status: "ON_DUTY",
+        },
+        { transaction },
+      );
+
+      await ReportTrackingLog.create(
+        {
+          reportId: report.id,
+          status: "ACCEPTED",
+          notes: `Report accepted by officer ${officer.fullName}`,
+          updatedByType: "OFFICER",
+          updatedById: authUser.id,
+        },
+        { transaction },
+      );
+
+      acceptedReport = report;
+    });
+
+    const fullDispatch = await this.getDispatchById(createdDispatch.id);
+
+    const payload = {
+      dispatchId: createdDispatch.id,
+      reportId: acceptedReport.id,
+      reportCode: acceptedReport.reportCode,
+      serviceId: acceptedReport.serviceId,
+      dispatchStatus: "ACCEPTED",
+      reportStatus: "ACCEPTED",
+      officerId: officer.id,
+      officerName: officer.fullName,
+      updatedAt: new Date(),
+    };
+
+    emitToAdminRoom("dispatch:accepted", payload);
+    emitToOfficer(authUser.id, "dispatch:accepted", payload);
+    emitToOfficerRoom("report:taken", payload);
+    emitToUser(acceptedReport.userId, "report:updated", payload);
+    emitToReportRoom(acceptedReport.id, "report:updated", payload);
+
+    return fullDispatch;
   }
 
   static async createDispatch(authUser, payload) {

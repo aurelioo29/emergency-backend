@@ -38,6 +38,7 @@ const registerSocketEvents = (io) => {
     }
 
     if (socket.user.type === "OFFICER") {
+      socket.join("officer-room");
       socket.join(`officer:${socket.user.id}`);
     }
 

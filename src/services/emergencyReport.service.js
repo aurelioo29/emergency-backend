@@ -115,20 +115,20 @@ class EmergencyReportService {
       status: report.status,
     });
 
-    let autoDispatchResult = null;
-
-    try {
-      autoDispatchResult =
-        await DispatchService.autoAssignNearestOfficer(report);
-    } catch (error) {
-      console.error("Auto assign nearest officer failed:", error.message);
-    }
+    // emitToOfficer("broadcast", "report:available", {
+    //   id: report.id,
+    //   reportCode: report.reportCode,
+    //   latitude: report.latitude,
+    //   longitude: report.longitude,
+    //   status: report.status,
+    //   serviceId: service.id,
+    //   serviceName: service.serviceName,
+    // });
 
     const reportDetail = await this.getReportDetail(authUser, report.id);
 
     return {
       report: reportDetail,
-      autoDispatch: autoDispatchResult,
     };
   }
 

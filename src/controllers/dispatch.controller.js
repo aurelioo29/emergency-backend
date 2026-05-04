@@ -147,6 +147,39 @@ class DispatchController {
       next(error);
     }
   }
+
+  static async getAvailableReports(req, res, next) {
+    try {
+      const result = await DispatchService.getAvailableReportsForOfficer(
+        req.user,
+        req.query,
+      );
+
+      return sendSuccess(res, {
+        message: "Get available reports success",
+        data: result.items,
+        meta: result.pagination,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async acceptAvailableReport(req, res, next) {
+    try {
+      const result = await DispatchService.acceptAvailableReport(
+        req.user,
+        req.params.reportId,
+      );
+
+      return sendSuccess(res, {
+        message: "Report accepted successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = DispatchController;

@@ -20,9 +20,15 @@ const emitToReportRoom = (reportId, event, payload) => {
   io.to(`report:${reportId}`).emit(event, payload);
 };
 
+const emitToOfficerRoom = (event, payload) => {
+  const io = getIO();
+  io.to("officer-room").emit(event, payload);
+};
+
 module.exports = {
   emitToAdminRoom,
   emitToUser,
   emitToOfficer,
+  emitToOfficerRoom,
   emitToReportRoom,
 };
