@@ -16,6 +16,8 @@ console.log("Serving uploads from:", uploadsPath);
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:7001",
+  "http://147.93.81.243:7000/",
+  "http://147.93.81.243:7001/",
   "https://alerta.project-mahadatatech.web.id",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
