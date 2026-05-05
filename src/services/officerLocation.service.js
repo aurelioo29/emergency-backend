@@ -84,6 +84,13 @@ class OfficerLocationService {
 
     emitToReportRoom(finalReportId, "officer:location_updated", payloadSocket);
 
+    console.log("📍 officer:location_updated emitted", {
+      reportId: finalReportId,
+      officerId: authUser.id,
+      latitude: location.latitude,
+      longitude: location.longitude,
+    });
+
     if (activeDispatch.report?.userId) {
       emitToUser(
         activeDispatch.report.userId,
