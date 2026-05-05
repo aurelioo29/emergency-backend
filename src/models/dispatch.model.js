@@ -58,6 +58,7 @@ const Dispatch = sequelize.define(
         "EXPIRED",
         "ON_THE_WAY",
         "ARRIVED",
+        "HANDLING",
         "COMPLETED",
         "CANCELLED",
       ),

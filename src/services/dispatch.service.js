@@ -247,13 +247,7 @@ class DispatchService {
         where: {
           officerId: authUser.id,
           dispatchStatus: {
-            [Op.in]: [
-              "ASSIGNED",
-              "ACCEPTED",
-              "ON_THE_WAY",
-              "ARRIVED",
-              "HANDLING",
-            ],
+            [Op.in]: ["ASSIGNED", "ACCEPTED", "ON_THE_WAY", "ARRIVED"],
           },
         },
         transaction,
